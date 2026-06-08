@@ -6,7 +6,7 @@ import datetime
 import plotly.express as px
 
 # 1. ตั้งค่าหน้าจอ
-st.set_page_config(page_title="Train Hazards Dashboard V1.13", page_icon="🚆", layout="wide")
+st.set_page_config(page_title="Train Hazards Dashboard V1.14", page_icon="🚆", layout="wide")
 
 # --- 🎨 ตกแต่ง UI และใส่ Background Image ธีม Safety ---
 background_url = "https://images.unsplash.com/photo-1474487548417-781cb71495f3?q=80&w=2000&auto=format&fit=crop"
@@ -60,7 +60,13 @@ if 'hazard_data' not in st.session_state:
 
 df = st.session_state.hazard_data
 
-# 💡 คลีนข้อมูลและป้องกัน Error จากไฟล์นำเข้าที่อาจมีตัวหนังสือปนมาในช่องตัวเลข
+# ==========================================
+# 💡 ขั้นตอนทำความสะอาดข้อมูล (Data Cleaning) ก่อนคำนวณ 💡
+# ==========================================
+# 1. ลบช่องว่าง (Space) ส่วนเกินหน้า-หลังของ "พื้นที่" เพื่อให้ชื่อเหมือนกันถูกนับในกราฟแท่งเดียวกัน
+df['พื้นที่'] = df['พื้นที่'].astype(str).str.strip()
+
+# 2. คลีนข้อมูลและป้องกัน Error ตัวหนังสือปนมาในช่องตัวเลขพิกัด
 df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
 df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
 
@@ -69,7 +75,7 @@ df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
 # ==========================================
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
-# 💡 แปลงข้อมูลความล่าช้าให้เป็นตัวเลขก่อนคำนวณ เพื่อป้องกัน Error
+# แปลงข้อมูลความล่าช้าให้เป็นตัวเลขก่อนคำนวณ เพื่อป้องกัน Error
 delay_sum = pd.to_numeric(df['ผลกระทบ(นาที)'], errors='coerce').fillna(0).sum()
 
 kpi1.metric("🚨 จำนวนเหตุการณ์ทั้งหมด", f"{len(df)} ครั้ง")
@@ -89,8 +95,10 @@ col_chart, col_map = st.columns([1, 1.2])
 with col_chart:
     st.markdown('<p class="section-header">📊 สถิติความเสี่ยงจำแนกตามพื้นที่</p>', unsafe_allow_html=True)
     if not df.empty:
+        # นับจำนวนพื้นที่ที่คลีนเว้นวรรคออกแล้ว 
         area_counts = df['พื้นที่'].value_counts().reset_index()
         area_counts.columns = ['พื้นที่', 'จำนวน']
+        
         fig = px.bar(area_counts, x='จำนวน', y='พื้นที่', orientation='h', text='จำนวน', color_discrete_sequence=['#DC2626']) 
         fig.update_layout(
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
@@ -103,7 +111,6 @@ with col_chart:
 with col_map:
     st.markdown('<p class="section-header">🗺️ แผนที่พิกัด (แตะเพื่อเปิด Google Maps)</p>', unsafe_allow_html=True)
     
-    # 💡 กรองพิกัดที่ใช้งานได้เพื่อหาจุดศูนย์กลางแผนที่
     valid_coords = df.dropna(subset=['Latitude', 'Longitude'])
     if not valid_coords.empty:
         center_lat, center_lon = valid_coords["Latitude"].mean(), valid_coords["Longitude"].mean()
@@ -233,6 +240,6 @@ with col_manual:
 st.markdown("""
     <div class="app-footer">
         <b>ออกแบบโดย :</b> วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา<br>
-        <span style="color: gray; font-size: 12px;">Version 1.13</span>
+        <span style="color: gray; font-size: 12px;">Version 1.14</span>
     </div>
 """, unsafe_allow_html=True)
