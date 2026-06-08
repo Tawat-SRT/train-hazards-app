@@ -60,14 +60,23 @@ if 'hazard_data' not in st.session_state:
 
 df = st.session_state.hazard_data
 
+# 💡 คลีนข้อมูลและป้องกัน Error จากไฟล์นำเข้าที่อาจมีตัวหนังสือปนมาในช่องตัวเลข
+df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
+df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
+
 # ==========================================
 # ส่วนที่ 1: สรุปตัวเลขสำคัญ
 # ==========================================
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+
+# 💡 แปลงข้อมูลความล่าช้าให้เป็นตัวเลขก่อนคำนวณ เพื่อป้องกัน Error
+delay_sum = pd.to_numeric(df['ผลกระทบ(นาที)'], errors='coerce').fillna(0).sum()
+
 kpi1.metric("🚨 จำนวนเหตุการณ์ทั้งหมด", f"{len(df)} ครั้ง")
-kpi2.metric("⏱️ ความล่าช้าสะสม", f"{df['ผลกระทบ(นาที)'].sum()} นาที")
-# ค้นหาคำว่า "ซ้ำ" ในคอลัมน์ใหม่
-kpi3.metric("⚠️ จุดเกิดเหตุซ้ำ", f"{len(df[df['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'].str.contains('ซ้ำ', na=False)])} แห่ง")
+kpi2.metric("⏱️ ความล่าช้าสะสม", f"{int(delay_sum)} นาที")
+
+repeated_cases = df['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'].astype(str)
+kpi3.metric("⚠️ จุดเกิดเหตุซ้ำ", f"{len(df[repeated_cases.str.contains('ซ้ำ', na=False)])} แห่ง")
 kpi4.metric("📍 พื้นที่เสี่ยงสูงสุด", df['พื้นที่'].mode()[0] if not df.empty else "-")
 
 st.write("") 
@@ -93,8 +102,11 @@ with col_chart:
 
 with col_map:
     st.markdown('<p class="section-header">🗺️ แผนที่พิกัด (แตะเพื่อเปิด Google Maps)</p>', unsafe_allow_html=True)
-    if not df.empty and pd.notna(df["Latitude"].iloc[0]):
-        center_lat, center_lon = df["Latitude"].mean(), df["Longitude"].mean()
+    
+    # 💡 กรองพิกัดที่ใช้งานได้เพื่อหาจุดศูนย์กลางแผนที่
+    valid_coords = df.dropna(subset=['Latitude', 'Longitude'])
+    if not valid_coords.empty:
+        center_lat, center_lon = valid_coords["Latitude"].mean(), valid_coords["Longitude"].mean()
     else:
         center_lat, center_lon = 13.7367, 100.5231
         
@@ -178,7 +190,7 @@ with col_upload:
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {e}")
 
-# --- 4.2 ฟอร์มกรอกข้อมูลด้วยมือ (อัปเดต Label ตรงกับคอลัมน์) ---
+# --- 4.2 ฟอร์มกรอกข้อมูลด้วยมือ ---
 with col_manual:
     with st.expander("📝 2. กรอกข้อมูลใหม่ด้วยตัวเอง", expanded=False):
         with st.form("realtime_input_form"):
