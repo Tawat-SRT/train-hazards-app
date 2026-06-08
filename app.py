@@ -80,4 +80,80 @@ with col_chart:
 
 with col_map:
     st.markdown('<p class="section-header">🗺️ แผนที่พิกัด (แตะเพื่อเปิด Google Maps)</p>', unsafe_allow_html=True)
-    if not df.empty and pd.notna(df["Latitude"].iloc
+    if not df.empty and pd.notna(df["Latitude"].iloc[0]):
+        center_lat, center_lon = df["Latitude"].mean(), df["Longitude"].mean()
+    else:
+        center_lat, center_lon = 13.7367, 100.5231
+        
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=6, 
+                   tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', attr='Google')
+    
+    for idx, row in df.iterrows():
+        if pd.notna(row['Latitude']) and pd.notna(row['Longitude']):
+            is_repeated = "ซ้ำ" in str(row['หมายเหตุ'])
+            marker_color = "darkred" if is_repeated else "red" 
+            
+            # 💡 อัปเดต Link รูปแบบใหม่สำหรับเปิด Google Maps App บน Android โดยเฉพาะ
+            android_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={row['Latitude']},{row['Longitude']}"
+            
+            # 💡 ออกแบบปุ่มให้ใหญ่ขึ้น (Touch-friendly) สำหรับนิ้วมือ
+            popup_html = f"""
+            <div style='font-family:Tahoma; font-size:14px; min-width:200px;'>
+                <b>{row['ชื่อเหตุอันตราย']}</b><br>
+                <span style='color:gray; font-size:12px;'>พื้นที่: {row['พื้นที่']}</span><br>
+                <hr style='margin:5px 0;'>
+                เวลา: {row['วัน/เดือน/ปี']} ({row['เวลา']} น.)<br>
+                ล่าช้า: <b style='color:red;'>{row['ผลกระทบ (นาที)']} นาที</b><br>
+                <a href='{android_maps_url}' target='_blank' 
+                   style='display:block; background-color:#2563EB; color:white; text-align:center; 
+                          padding:10px; margin-top:12px; border-radius:6px; text-decoration:none; 
+                          font-weight:bold; font-size:14px;'>
+                   🧭 นำทางด้วย Google Maps App
+                </a>
+            </div>
+            """
+            
+            folium.Marker(
+                location=[row["Latitude"], row["Longitude"]],
+                popup=folium.Popup(popup_html, max_width=300),
+                icon=folium.Icon(color=marker_color, icon="warning-sign")
+            ).add_to(m)
+
+    # use_container_width=True ช่วยให้แผนที่ยืดขยายพอดีหน้าจอมือถืออัตโนมัติ
+    st_folium(m, height=350, use_container_width=True, returned_objects=[]) 
+
+# ==========================================
+# ส่วนที่ 3: ตารางข้อมูล
+# ==========================================
+st.markdown('<p class="section-header">📋 ล็อกบุ๊กเหตุการณ์ล่าสุด</p>', unsafe_allow_html=True)
+st.dataframe(df.iloc[::-1], use_container_width=True, height=200)
+
+# ==========================================
+# ส่วนที่ 4: ฟอร์มเพิ่มข้อมูลแบบเรียลไทม์
+# ==========================================
+with st.expander("➕ เพิ่มข้อมูลเหตุการณ์ใหม่"):
+    with st.form("realtime_input_form"):
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            input_name = st.text_input("ชื่อเหตุอันตราย")
+            input_area = st.text_input("พื้นที่ (แขวงฯ)")
+            input_date = st.date_input("วันที่เกิดเหตุ")
+        with col_f2:
+            input_km = st.text_input("ที่ กม.")
+            input_impact = st.number_input("ล่าช้า (นาที)", min_value=0, step=1)
+            input_time = st.time_input("เวลา", value=datetime.time(12, 00))
+        with col_f3:
+            input_lat = st.number_input("Latitude", value=13.7367, format="%.5f")
+            input_lon = st.number_input("Longitude", value=100.5231, format="%.5f")
+            input_remark = st.text_input("หมายเหตุ (เช่น ซ้ำ)")
+            
+        submit = st.form_submit_button("💾 ยืนยันบันทึกข้อมูล", type="primary", use_container_width=True)
+        if submit:
+            new_row = pd.DataFrame([{
+                "ชื่อเหตุอันตราย": input_name, "พื้นที่": input_area, "ที่ กม.": input_km,
+                "วัน/เดือน/ปี": input_date.strftime("%Y-%m-%d"), "เวลา": input_time.strftime("%H:%M"), 
+                "ค่าใช้จ่าย": "-", "Latitude": input_lat, "Longitude": input_lon,
+                "ผลกระทบ (นาที)": input_impact, "หมายเหตุ": input_remark
+            }])
+            st.session_state.hazard_data = pd.concat([st.session_state.hazard_data, new_row], ignore_index=True)
+            st.rerun()
