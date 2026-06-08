@@ -6,7 +6,7 @@ import datetime
 import plotly.express as px
 
 # 1. ตั้งค่าหน้าจอ
-st.set_page_config(page_title="Train Hazards Dashboard V1.12", page_icon="🚆", layout="wide")
+st.set_page_config(page_title="Train Hazards Dashboard V1.13", page_icon="🚆", layout="wide")
 
 # --- 🎨 ตกแต่ง UI และใส่ Background Image ธีม Safety ---
 background_url = "https://images.unsplash.com/photo-1474487548417-781cb71495f3?q=80&w=2000&auto=format&fit=crop"
@@ -43,17 +43,19 @@ st.markdown(f"""
 st.markdown('<p class="dashboard-title">🛡️ Safety First: Train Hazards Dashboard</p>', unsafe_allow_html=True)
 st.markdown('<p class="dashboard-subtitle">ระบบรายงาน เฝ้าระวัง และจัดการอุบัติเหตุรถไฟเฉี่ยวชนสัตว์</p>', unsafe_allow_html=True)
 
-# 2. ฐานข้อมูลจำลอง
+# 2. ฐานข้อมูลจำลอง (อัปเดตชื่อคอลัมน์ให้ตรง 100%)
 if 'hazard_data' not in st.session_state:
     st.session_state.hazard_data = pd.DataFrame({
         "ชื่อเหตุอันตราย": ["ชนโค ท่าพระ-ขอนแก่น", "เฉี่ยวชนกระบือ บ้านช่อง-หินซ้อน", "ชนโค หนองน้ำขุ่น-บ้านใหม่"],
         "พื้นที่": ["แขวงฯ ขอนแก่น", "แขวงฯ ฉะเชิงเทรา", "แขวงฯ นครราชสีมา"],
         "ที่ กม.": ["345+100", "150+200", "250+500"],
         "วัน/เดือน/ปี": ["2024-02-15", "2024-03-11", "2024-04-05"],
-        "เวลา": ["10:30", "14:45", "08:15"],
+        "เวลา ที่เกิดเหตุ": ["10:30", "14:45", "08:15"],
         "ค่าใช้จ่าย": ["ไม่มีค่าใช้จ่าย", "มีค่าใช้จ่าย 5,000 บาท", "ไม่มีค่าใช้จ่าย"],
-        "Latitude": [16.3650, 14.6540, 14.9722], "Longitude": [102.8340, 101.1230, 102.0833],
-        "ผลกระทบ (นาที)": [15, 30, 10], "หมายเหตุ": ["-", "ซ้ำ ± 3 Km", "-"]
+        "Latitude": [16.3650, 14.6540, 14.9722], 
+        "Longitude": [102.8340, 101.1230, 102.0833],
+        "ผลกระทบ(นาที)": [15, 30, 10], 
+        "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": ["-", "ซ้ำ ± 3 Km", "-"]
     })
 
 df = st.session_state.hazard_data
@@ -63,8 +65,9 @@ df = st.session_state.hazard_data
 # ==========================================
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 kpi1.metric("🚨 จำนวนเหตุการณ์ทั้งหมด", f"{len(df)} ครั้ง")
-kpi2.metric("⏱️ ความล่าช้าสะสม", f"{df['ผลกระทบ (นาที)'].sum()} นาที")
-kpi3.metric("⚠️ จุดเกิดเหตุซ้ำ", f"{len(df[df['หมายเหตุ'].str.contains('ซ้ำ', na=False)])} แห่ง")
+kpi2.metric("⏱️ ความล่าช้าสะสม", f"{df['ผลกระทบ(นาที)'].sum()} นาที")
+# ค้นหาคำว่า "ซ้ำ" ในคอลัมน์ใหม่
+kpi3.metric("⚠️ จุดเกิดเหตุซ้ำ", f"{len(df[df['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'].str.contains('ซ้ำ', na=False)])} แห่ง")
 kpi4.metric("📍 พื้นที่เสี่ยงสูงสุด", df['พื้นที่'].mode()[0] if not df.empty else "-")
 
 st.write("") 
@@ -100,7 +103,7 @@ with col_map:
     
     for idx, row in df.iterrows():
         if pd.notna(row['Latitude']) and pd.notna(row['Longitude']):
-            is_repeated = "ซ้ำ" in str(row['หมายเหตุ'])
+            is_repeated = "ซ้ำ" in str(row['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'])
             marker_color = "darkred" if is_repeated else "red" 
             
             android_maps_url = f"https://www.google.com/maps/dir/?api=1&destination={row['Latitude']},{row['Longitude']}"
@@ -109,8 +112,8 @@ with col_map:
                 <b>{row['ชื่อเหตุอันตราย']}</b><br>
                 <span style='color:gray; font-size:12px;'>พื้นที่: {row['พื้นที่']}</span><br>
                 <hr style='margin:5px 0;'>
-                เวลา: {row['วัน/เดือน/ปี']} ({row['เวลา']} น.)<br>
-                ล่าช้า: <b style='color:red;'>{row['ผลกระทบ (นาที)']} นาที</b><br>
+                เวลา: {row['วัน/เดือน/ปี']} ({row['เวลา ที่เกิดเหตุ']} น.)<br>
+                ล่าช้า: <b style='color:red;'>{row['ผลกระทบ(นาที)']} นาที</b><br>
                 <a href='{android_maps_url}' target='_blank' 
                    style='display:block; background-color:#2563EB; color:white; text-align:center; 
                           padding:10px; margin-top:12px; border-radius:6px; text-decoration:none; 
@@ -162,7 +165,6 @@ with col_upload:
         
         if uploaded_file is not None:
             try:
-                # อ่านไฟล์ตามนามสกุล
                 if uploaded_file.name.endswith('.csv'):
                     df_new = pd.read_csv(uploaded_file)
                 elif uploaded_file.name.endswith('.xlsx'):
@@ -170,39 +172,45 @@ with col_upload:
                 
                 st.success("อ่านไฟล์สำเร็จ! พบข้อมูลจำนวน {} รายการ".format(len(df_new)))
                 
-                # ปุ่มยืนยันการผสานข้อมูล
                 if st.button("➕ ยืนยันผสานข้อมูลเข้าระบบ", type="primary"):
                     st.session_state.hazard_data = pd.concat([st.session_state.hazard_data, df_new], ignore_index=True)
                     st.rerun()
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {e}")
 
-# --- 4.2 ฟอร์มกรอกข้อมูลด้วยมือ ---
+# --- 4.2 ฟอร์มกรอกข้อมูลด้วยมือ (อัปเดต Label ตรงกับคอลัมน์) ---
 with col_manual:
     with st.expander("📝 2. กรอกข้อมูลใหม่ด้วยตัวเอง", expanded=False):
         with st.form("realtime_input_form"):
             input_name = st.text_input("ชื่อเหตุอันตราย")
-            input_area = st.text_input("พื้นที่ (แขวงฯ)")
+            input_area = st.text_input("พื้นที่")
+            input_km = st.text_input("ที่ กม.")
             
             c1, c2 = st.columns(2)
             with c1:
-                input_date = st.date_input("วันที่เกิดเหตุ")
-                input_km = st.text_input("ที่ กม.")
+                input_date = st.date_input("วัน/เดือน/ปี")
                 input_lat = st.number_input("Latitude", value=13.7367, format="%.5f")
+                input_impact = st.number_input("ผลกระทบ(นาที)", min_value=0, step=1)
             with c2:
-                input_time = st.time_input("เวลา", value=datetime.time(12, 00))
-                input_impact = st.number_input("ล่าช้า (นาที)", min_value=0, step=1)
+                input_time = st.time_input("เวลา ที่เกิดเหตุ", value=datetime.time(12, 00))
                 input_lon = st.number_input("Longitude", value=100.5231, format="%.5f")
+                input_cost = st.text_input("ค่าใช้จ่าย", value="ไม่มีค่าใช้จ่าย")
                 
-            input_remark = st.text_input("หมายเหตุ (เช่น ซ้ำ)")
+            input_remark = st.text_input("หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)", placeholder="เช่น ซ้ำ")
                 
             submit = st.form_submit_button("💾 ยืนยันบันทึกข้อมูล", type="primary", use_container_width=True)
             if submit:
                 new_row = pd.DataFrame([{
-                    "ชื่อเหตุอันตราย": input_name, "พื้นที่": input_area, "ที่ กม.": input_km,
-                    "วัน/เดือน/ปี": input_date.strftime("%Y-%m-%d"), "เวลา": input_time.strftime("%H:%M"), 
-                    "ค่าใช้จ่าย": "-", "Latitude": input_lat, "Longitude": input_lon,
-                    "ผลกระทบ (นาที)": input_impact, "หมายเหตุ": input_remark
+                    "ชื่อเหตุอันตราย": input_name, 
+                    "พื้นที่": input_area, 
+                    "ที่ กม.": input_km,
+                    "วัน/เดือน/ปี": input_date.strftime("%Y-%m-%d"), 
+                    "เวลา ที่เกิดเหตุ": input_time.strftime("%H:%M"), 
+                    "ค่าใช้จ่าย": input_cost, 
+                    "Latitude": input_lat, 
+                    "Longitude": input_lon,
+                    "ผลกระทบ(นาที)": input_impact, 
+                    "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": input_remark
                 }])
                 st.session_state.hazard_data = pd.concat([st.session_state.hazard_data, new_row], ignore_index=True)
                 st.rerun()
@@ -213,6 +221,6 @@ with col_manual:
 st.markdown("""
     <div class="app-footer">
         <b>ออกแบบโดย :</b> วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา<br>
-        <span style="color: gray; font-size: 12px;">Version 1.12</span>
+        <span style="color: gray; font-size: 12px;">Version 1.13</span>
     </div>
 """, unsafe_allow_html=True)
