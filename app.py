@@ -5,9 +5,10 @@ from streamlit_folium import st_folium
 import datetime
 import plotly.express as px
 import os
+import re
 
 # 1. ตั้งค่าหน้าจอแบบกว้างพิเศษเพื่อความภูมิฐาน
-st.set_page_config(page_title="Train Hazards Executive Dashboard V1.17.3", page_icon="🚆", layout="wide")
+st.set_page_config(page_title="Train Hazards Executive Dashboard V1.17.4", page_icon="🚆", layout="wide")
 
 # ฐานข้อมูลกลาง (Shared Database สำหรับทุกคน)
 DATA_FILE = "hazard_data_shared.csv"
@@ -29,7 +30,18 @@ def convert_to_thai_date(date_str):
     except:
         return date_str
 
-# ฟังก์ชันโหลดและจัดระเบียบข้อมูล (Sort ล่าสุด -> เก่าสุด)
+# ฟังก์ชันแปลง "ที่ กม." ให้เป็นตัวเลขเพื่อใช้ในการ Sort (เช่น 345+100 -> 345.1)
+def parse_km_to_numeric(km_str):
+    try:
+        km_cleaned = re.sub(r'[^\d+.]', '', str(km_str)) # ลบตัวอักษรอื่นออกเหลือแค่ตัวเลขและเครื่องหมายบวก
+        if '+' in km_cleaned:
+            parts = km_cleaned.split('+')
+            return float(parts[0]) + (float(parts[1]) / 1000.0)
+        return float(km_cleaned)
+    except:
+        return 999999.0 # หากแปลงไม่ได้ให้เอาไปไว้ท้ายสุด
+
+# ฟังก์ชันโหลดและจัดระเบียบข้อมูล (เรียงลำดับเวลาล่าสุด -> เก่าสุด เสมอ)
 def load_and_sort_data():
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
@@ -52,7 +64,8 @@ def load_and_sort_data():
     df['temp_date'] = pd.to_datetime(df['วัน/เดือน/ปี'], errors='coerce')
     
     # สั่งเรียงลำดับจาก ปัจจุบัน (ใหม่สุด) ไปหา อดีต (เก่าสุด)
-    df = df.sort_values(by=['temp_date', 'เวลา ที่เกิดเหตุ'], ascending=[False, False]).drop(columns=['temp_date'])
+    df = df.sort_values(by=['temp_date', 'เวลา ที่เกิดเหตุ'], ascending=[False, False]).reset_index(drop=True)
+    df = df.drop(columns=['temp_date'])
     return df
 
 # --- 🎨 ตกแต่ง UI ระดับ Premium (Corporate & Executive Theme) ---
@@ -78,7 +91,7 @@ st.markdown(f"""
         border: 1px solid rgba(226, 232, 240, 0.8);
         border-top: 4px solid #1E3A8A;
     }}
-    div[data-testid="stMetricValue"] {{ font-size: 34px !important; font-weight: 800 !important; color: #1E3A8A !important; }}
+    div[data-testid="stMetricValue"] {{ font-size: 32px !important; font-weight: 800 !important; color: #1E3A8A !important; }}
     div[data-testid="stMetricLabel"] {{ font-size: 16px !important; font-weight: 600 !important; color: #475569 !important; }}
     
     .dashboard-title {{ font-size: 36px; font-weight: 800; color: #0F172A; margin-bottom: 0px; }}
@@ -130,14 +143,16 @@ with col_print:
     if st.button("🖨️ ส่งออกรายงานเป็น PDF (A4)", use_container_width=True, type="primary"):
         st.info("💡 **คำแนะนำผู้บริหาร:** กดปุ่ม **Ctrl + P** (Windows) หรือ **Cmd + P** (Mac) แล้วเลือก 'Save as PDF'")
 
-# โหลดข้อมูลและจัดลำดับล่าสุดขึ้นก่อน
-df = load_and_sort_data()
-df['พื้นที่'] = df['พื้นที่'].astype(str).str.strip()
-df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
-df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
+# โหลดข้อมูลและจัดลำดับล่าสุดขึ้นก่อน (Shared File)
+df_base = load_and_sort_data()
 
-# 🌟 ข้อ 1: เตรียมข้อมูลตารางแสดงผล (เพิ่มคอลัมน์ ลำดับที่ 1 ถึง ปัจจุบัน โดยเวลาเรียงจากใหม่ไปเก่า)
-df_display = df.copy()
+# คลีนนิ่งและแปลงประเภทข้อมูลพื้นฐาน
+df_base['พื้นที่'] = df_base['พื้นที่'].astype(str).str.strip()
+df_base['Latitude'] = pd.to_numeric(df_base['Latitude'], errors='coerce')
+df_base['Longitude'] = pd.to_numeric(df_base['Longitude'], errors='coerce')
+
+# เตรียมข้อมูลตารางแสดงผลหลัก (เพิ่มคอลัมน์ ลำดับที่ 1 ถึง ปัจจุบัน โดยเวลาเรียงจากปัจจุบันไปอดีต)
+df_display = df_base.copy()
 df_display['วัน/เดือน/ปี'] = df_display['วัน/เดือน/ปี'].apply(convert_to_thai_date)
 df_display.insert(0, 'ลำดับที่', range(1, len(df_display) + 1)) # ใส่ลำดับรันจาก 1 ถึง N
 
@@ -145,38 +160,45 @@ df_display.insert(0, 'ลำดับที่', range(1, len(df_display) + 1)) 
 # ส่วนที่ 1: สรุปสถิติตัวเลขสำคัญ (KPIs)
 # ==========================================
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-delay_sum = pd.to_numeric(df['ผลกระทบ(นาที)'], errors='coerce').fillna(0).sum()
+delay_sum = pd.to_numeric(df_base['ผลกระทบ(นาที)'], errors='coerce').fillna(0).sum()
 
-# คัดกรองข้อมูลจุดซ้ำ
-repeated_cases_mask = df['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'].astype(str).str.contains('ซ้ำ', na=False)
-df_repeated = df_display[df_display['ชื่อเหตุอันตราย'].isin(df[repeated_cases_mask]['ชื่อเหตุอันตราย'])]
+# คัดกรองข้อมูลจุดเกิดเหตุซ้ำ
+repeated_cases_mask = df_base['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'].astype(str).str.contains('ซ้ำ', na=False)
+df_repeated_raw = df_base[repeated_cases_mask].copy()
 
-kpi1.metric("🚨 เหตุการณ์สะสม", f"{len(df)} ครั้ง")
-kpi2.metric("⚠️ พิกัดเกิดเหตุซ้ำ (± 3 Km)", f"{len(df_repeated)} แห่ง")
-kpi3.metric("📍 พื้นที่วิกฤตสูงสุด", df['พื้นที่'].mode()[0] if not df.empty else "-")
+kpi1.metric("🚨 เหตุการณ์สะสม", f"{len(df_base)} ครั้ง")
+kpi2.metric("⚠️ พิกัดเกิดเหตุซ้ำ (± 3 Km)", f"{len(df_repeated_raw)} แห่ง")
+kpi3.metric("📍 พื้นที่วิกฤตสูงสุด", df_base['พื้นที่'].mode()[0] if not df_base.empty else "-")
 kpi4.metric("⏱️ ความล่าช้ารวมขบวน", f"{int(delay_sum)} นาที")
 
 st.write("") 
 
 # ==========================================
-# ปุ่มกดแสดงข้อมูลจุดเกิดเหตุซ้ำ
+# 🌟 ข้อ 1: ปุ่มกดแสดงข้อมูลจุดเกิดเหตุซ้ำ (เรียงตามพิกัด กม. เดียวกันหรือติดกัน)
 # ==========================================
 st.markdown('<p class="section-header">❌ พื้นที่เฝ้าระวังพิเศษ (พิกัดที่เกิดเหตุซ้ำซาก)</p>', unsafe_allow_html=True)
-show_repeated = st.checkbox("🔍 คลิกที่นี่ เพื่อเปิด/ปิด ตารางแสดงรายละเอียดจุดเกิดเหตุซ้ำสะสม", value=False, key="rep_check")
+show_repeated = st.checkbox("🔍 คลิกที่นี่ เพื่อเปิด/ปิด ตารางแสดงรายละเอียดจุดเกิดเหตุซ้ำสะสม (จัดกลุ่มตามเลข ที่ กม.)", value=False, key="rep_check")
 
 if show_repeated:
-    if not df_repeated.empty:
+    if not df_repeated_raw.empty:
+        # 💡 ปรับปรุงข้อ 1: ใช้ฟังก์ชัน parse ตัวเลข กม. เพื่อทำการเรียงลำดับพิกัดที่อยู่ติดกัน/กม.เดียวกัน
+        df_repeated_raw['km_numeric'] = df_repeated_raw['ที่ กม.'].apply(parse_km_to_numeric)
+        df_repeated_sorted = df_repeated_raw.sort_values(by='km_numeric').drop(columns=['km_numeric'])
+        
+        # ปรับฟอร์แมตวันที่ให้เป็นไทย พ.ศ. สำหรับแสดงผลสรุป
+        df_repeated_sorted['วัน/เดือน/ปี'] = df_repeated_sorted['วัน/เดือน/ปี'].apply(convert_to_thai_date)
+        
         st.markdown(
             f"""<div class="danger-box">
-                <b>📌 รายงานด่วนเชิงนโยบาย:</b> ปัจจุบันพบจุดเกิดอุบัติเหตุซ้ำซากในรัศมี 3 กิโลเมตร จำนวน <b>{len(df_repeated)} พิกัด</b> 
-                ควรพิจารณามาตรการเชิงรุกร่วมกับแขวงบำรุงทางในพื้นที่โดยด่วน
+                <b>📌 รายงานด่วนเชิงนโยบาย:</b> ระบบได้จัดกลุ่มพิกัดที่เกิดเหตุซ้ำตาม <b>เลข กม. ข้างเคียง/กม. เดียวกัน</b> จำนวน <b>{len(df_repeated_sorted)} แห่ง</b> 
+                เพื่อช่วยให้ฝ่ายการช่างโยธาสามารถวางแผนกรรรมสิทธิ์ล้อมรั้วป้องกันในพิกัดพื้นที่ต่อเนื่องได้อย่างมีประสิทธิภาพ
             </div>""", unsafe_allow_html=True
         )
-        st.dataframe(df_repeated, use_container_width=True, hide_index=True)
+        st.dataframe(df_repeated_sorted, use_container_width=True, hide_index=True)
     else:
         st.success("✅ จากการตรวจสอบ ไม่พบพิกัดที่เกิดเหตุซ้ำซากในระบบ ณ ขณะนี้")
 else:
-    st.info("💡 ข้อมูลรายละเอียดจุดเกิดเหตุซ้ำซากถูกซ่อนอยู่ (คลิกช่องด้านบนเพื่อเปิดแสดงข้อมูล)")
+    st.info("💡 ข้อมูลรายละเอียดจุดเกิดเหตุซ้ำซากถูกซ่อนอยู่ (คลิกช่องด้านบนเพื่อเปิดแสดงข้อมูลที่เรียงตามตำแหน่ง กม.)")
 
 st.write("")
 
@@ -187,15 +209,14 @@ col_chart, col_map = st.columns([1.1, 1.1])
 
 with col_chart:
     st.markdown('<p class="section-header">📊 ลำดับความเสี่ยงจำแนกตามแขวงบำรุงทาง</p>', unsafe_allow_html=True)
-    if not df.empty:
-        area_counts = df['พื้นที่'].value_counts().reset_index()
+    if not df_base.empty:
+        area_counts = df_base['พื้นที่'].value_counts().reset_index()
         area_counts.columns = ['พื้นที่', 'จำนวนเหตุการณ์']
         area_counts = area_counts.sort_values(by='จำนวนเหตุการณ์', ascending=True)
         
         fig = px.bar(
             area_counts, x='จำนวนเหตุการณ์', y='พื้นที่', orientation='h', text='จำนวนเหตุการณ์',
-            color='จำนวนเหตุการณ์', color_continuous_scale=['#FCA5A5', '#EF4444', '#991B1B'],
-            labels={'...': '...'}
+            color='จำนวนเหตุการณ์', color_continuous_scale=['#FCA5A5', '#EF4444', '#991B1B']
         ) 
         
         dynamic_height = max(300, len(area_counts) * 45)
@@ -210,7 +231,7 @@ with col_chart:
 
 with col_map:
     st.markdown('<p class="section-header">🗺️ แผนที่พิกัดภาพรวมภูมิศาสตร์ภูมิภาค</p>', unsafe_allow_html=True)
-    valid_coords = df.dropna(subset=['Latitude', 'Longitude'])
+    valid_coords = df_base.dropna(subset=['Latitude', 'Longitude'])
     if not valid_coords.empty:
         center_lat, center_lon = valid_coords["Latitude"].mean(), valid_coords["Longitude"].mean()
     else:
@@ -219,7 +240,7 @@ with col_map:
     m = folium.Map(location=[center_lat, center_lon], zoom_start=6, 
                    tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', attr='Google Base Map')
     
-    for idx, row in df.iterrows():
+    for idx, row in df_base.iterrows():
         if pd.notna(row['Latitude']) and pd.notna(row['Longitude']):
             is_repeated = "ซ้ำ" in str(row['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'])
             marker_color = "darkred" if is_repeated else "red" 
@@ -240,7 +261,7 @@ with col_map:
     st_folium(m, height=dynamic_height, use_container_width=True, returned_objects=[]) 
 
 # ==========================================
-# ส่วนที่ 3: ตารางแสดงข้อมูลรวม (ข้อ 1: รัน 1 ถึง N และเรียงจากปัจจุบันไปอดีต)
+# ส่วนที่ 3: ตารางแสดงข้อมูลรวม (รัน 1 ถึง N และเรียงจากปัจจุบันไปอดีต)
 # ==========================================
 st.markdown('<div class="main-data-table">', unsafe_allow_html=True)
 st.markdown('<p class="section-header">📋 ทะเบียนประวัติข้อมูลเหตุการณ์ทั้งหมด (เรียงลำดับเวลาปัจจุบัน ➡️ อดีต)</p>', unsafe_allow_html=True)
@@ -248,22 +269,22 @@ st.dataframe(df_display, use_container_width=True, hide_index=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# 🌟 ข้อ 2: ศูนย์จัดการข้อมูลระบบปฏิบัติการ (เพิ่มปุ่มเลือกเพื่อล็อกอิน/เปิดเข้าสู่โหมดจัดการ)
+# 🌟 ข้อ 2: ศูนย์จัดการข้อมูลระบบปฏิบัติการ (เรียงลำดับเดียวกับทะเบียนประวัติหลัก)
 # ==========================================
 st.markdown('<div class="no-print">', unsafe_allow_html=True)
 st.markdown('<p class="section-header">⚙️ ศูนย์จัดการข้อมูลระบบปฏิบัติการ (สำหรับเจ้าหน้าที่บันทึกข้อมูล)</p>', unsafe_allow_html=True)
 
-# ปุ่มสำหรับเลือกเปิดโหมดการจัดการข้อมูล ป้องกันการกดแก้ไขโดยไม่ตั้งใจ
+# ปุ่มสวิตช์สำหรับเลือกเปิดโหมดการจัดการข้อมูล
 enable_management = st.checkbox("🔓 **คลิกเลือกช่องนี้เพื่อเข้าสู่โหมด เพิ่มเติม แก้ไข หรืออัปเดตข้อมูลระบบ**", value=False)
 
 if enable_management:
     st.markdown('<div class="management-panel">', unsafe_allow_html=True)
-    st.warning("⚠️ **โหมดแก้ไขข้อมูลเปิดอยู่:** การปรับปรุงข้อมูลในตารางด้านล่างและกดปุ่มบันทึก จะส่งผลต่อหน้าจอแดชบอร์ดของผู้ใช้ทุกคนทันทีแบบ Real-time")
+    st.warning("⚠️ **โหมดแก้ไขข้อมูลเปิดอยู่:** โครงสร้างตารางนี้ถูกเรียงลำดับแบบเดียวกับทะเบียนประวัติ (ปัจจุบัน ➡️ อดีต) เพื่อให้ง่ายต่อการตรวจทานข้อมูลแถวล่าสุด")
     
-    # ตารางสําหรับแก้ไขฐานข้อมูลดิบกลาง
+    # 💡 ปรับปรุงข้อ 2: ตาราง data_editor จะแสดงผลข้อมูลดิบที่เรียงลำดับเวลาเดียวกับประวัติหลัก (ใหม่ไปเก่า)
     edited_df = st.data_editor(
-        df,
-        use_container_width=True, num_rows="dynamic", height=220, key="editor"
+        df_base, # ดึง df_base ที่ผ่านการ sort ใหม่ไปเก่ามาให้แก้ไขโดยตรง
+        use_container_width=True, num_rows="dynamic", height=250, key="editor"
     )
 
     if st.button("💾 ยืนยันการอัปเดตและบันทึกฐานข้อมูลร่วมกัน", use_container_width=True, type="primary"):
@@ -271,7 +292,7 @@ if enable_management:
         st.success("✅ บันทึกข้อมูลลงสู่ฐานข้อมูลกลางเรียบร้อยแล้ว!")
         st.rerun()
 
-    # ส่วนฟอร์มเพิ่มข้อมูลและอัปโหลดไฟล์
+    # ส่วนฟอร์มเพิ่มข้อมูลแบบแมนนวลและอัปโหลดไฟล์
     col_upload, col_manual = st.columns(2)
     with col_upload:
         with st.expander("📥 การนำเข้าข้อมูลผ่านไฟล์ (.csv, .xlsx)"):
@@ -280,7 +301,7 @@ if enable_management:
                 if uploaded_file.name.endswith('.csv'): df_new = pd.read_csv(uploaded_file)
                 elif uploaded_file.name.endswith('.xlsx'): df_new = pd.read_excel(uploaded_file)
                 if st.button("➕ ยืนยันประมวลผลและผสานไฟล์", type="secondary"):
-                    combined_df = pd.concat([df, df_new], ignore_index=True)
+                    combined_df = pd.concat([df_base, df_new], ignore_index=True)
                     combined_df.to_csv(DATA_FILE, index=False)
                     st.success("ผสานข้อมูลร่วมกันสำเร็จ!")
                     st.rerun()
@@ -307,7 +328,7 @@ if enable_management:
                         "วัน/เดือน/ปี": input_date.strftime("%Y-%m-%d"), "เวลา ที่เกิดเหตุ": input_time.strftime("%H:%M"), 
                         "ค่าใช้จ่าย": input_cost, "Latitude": input_lat, "Longitude": input_lon,
                         "ผลกระทบ(นาที)": input_impact, "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": input_remark}])
-                    combined_df = pd.concat([df, new_row], ignore_index=True)
+                    combined_df = pd.concat([df_base, new_row], ignore_index=True)
                     combined_df.to_csv(DATA_FILE, index=False)
                     st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
@@ -321,6 +342,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("""
     <div class="app-footer">
         <b>ระบบสารสนเทศความปลอดภัย :</b> วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา การรถไฟแห่งประเทศไทย<br>
-        <span style="color: #94A3B8; font-size: 13px;">Executive Dashboard Version 1.17.3 (Shared Database Engine)</span>
+        <span style="color: #94A3B8; font-size: 13px;">Executive Dashboard Version 1.17.4 (Shared Database Engine)</span>
     </div>
 """, unsafe_allow_html=True)
