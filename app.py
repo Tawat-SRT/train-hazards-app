@@ -4,9 +4,34 @@ import folium
 from streamlit_folium import st_folium
 import datetime
 import plotly.express as px
+import os
 
 # 1. ตั้งค่าหน้าจอ
 st.set_page_config(page_title="Train Hazards Dashboard V1.17", page_icon="🚆", layout="wide")
+
+# 🌟 กำหนดชื่อไฟล์สำหรับเป็นฐานข้อมูลกลาง (Shared Database สำหรับทุกคน)
+DATA_FILE = "hazard_data_shared.csv"
+
+# 🌟 ฟังก์ชันสำหรับโหลดข้อมูลกลาง หรือสร้างข้อมูลเริ่มต้นหากยังไม่มีไฟล์
+def load_shared_data():
+    if os.path.exists(DATA_FILE):
+        return pd.read_csv(DATA_FILE)
+    else:
+        # ข้อมูลเริ่มต้นตามโครงสร้างเดิมของ Version 1.17
+        initial_df = pd.DataFrame({
+            "ชื่อเหตุอันตราย": ["ชนโค ท่าพระ-ขอนแก่น", "เฉี่ยวชนกระบือ บ้านช่อง-หินซ้อน", "ชนโค หนองน้ำขุ่น-บ้านใหม่"],
+            "พื้นที่": ["แขวงฯ ขอนแก่น", "แขวงฯ ฉะเชิงเทรา", "แขวงฯ นครราชสีมา"],
+            "ที่ กม.": ["345+100", "150+200", "250+500"],
+            "วัน/เดือน/ปี": ["2024-02-15", "2024-03-11", "2024-04-05"],
+            "เวลา ที่เกิดเหตุ": ["10:30", "14:45", "08:15"],
+            "ค่าใช้จ่าย": ["ไม่มีค่าใช้จ่าย", "มีค่าใช้จ่าย 5,000 บาท", "ไม่มีค่าใช้จ่าย"],
+            "Latitude": [16.3650, 14.6540, 14.9722], 
+            "Longitude": [102.8340, 101.1230, 102.0833],
+            "ผลกระทบ(นาที)": [15, 30, 10], 
+            "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": ["-", "ซ้ำ ± 3 Km", "-"]
+        })
+        initial_df.to_csv(DATA_FILE, index=False)
+        return initial_df
 
 # --- 🎨 ตกแต่ง UI, ฟอนต์ TH Sarabun และระบบ Print A4 ---
 background_url = "https://images.unsplash.com/photo-1474487548417-781cb71495f3?q=80&w=2000&auto=format&fit=crop"
@@ -87,22 +112,10 @@ with col_print:
     if st.button("🖨️ บันทึกรายงาน PDF (A4)", use_container_width=True, type="primary"):
         st.info("💡 **กดปุ่ม Ctrl + P** หรือ **Cmd + P** แล้วเลือก Save as PDF ระบบได้จัดหน้า 1 เป็นสรุป และหน้า 2 เป็นตารางไว้ให้แล้วครับ")
 
-# 2. ฐานข้อมูลจำลอง
-if 'hazard_data' not in st.session_state:
-    st.session_state.hazard_data = pd.DataFrame({
-        "ชื่อเหตุอันตราย": ["ชนโค ท่าพระ-ขอนแก่น", "เฉี่ยวชนกระบือ บ้านช่อง-หินซ้อน", "ชนโค หนองน้ำขุ่น-บ้านใหม่"],
-        "พื้นที่": ["แขวงฯ ขอนแก่น", "แขวงฯ ฉะเชิงเทรา", "แขวงฯ นครราชสีมา"],
-        "ที่ กม.": ["345+100", "150+200", "250+500"],
-        "วัน/เดือน/ปี": ["2024-02-15", "2024-03-11", "2024-04-05"],
-        "เวลา ที่เกิดเหตุ": ["10:30", "14:45", "08:15"],
-        "ค่าใช้จ่าย": ["ไม่มีค่าใช้จ่าย", "มีค่าใช้จ่าย 5,000 บาท", "ไม่มีค่าใช้จ่าย"],
-        "Latitude": [16.3650, 14.6540, 14.9722], 
-        "Longitude": [102.8340, 101.1230, 102.0833],
-        "ผลกระทบ(นาที)": [15, 30, 10], 
-        "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": ["-", "ซ้ำ ± 3 Km", "-"]
-    })
+# 🌟 ดึงข้อมูลจากฐานข้อมูล Shared CSV แทนระบบ Session State เดิมชั่วคราว เพื่อให้ทุกคนเห็นตรงกัน
+df = load_shared_data()
 
-df = st.session_state.hazard_data
+# คลีนนิ่งและแปลงประเภทข้อมูลพื้นฐาน
 df['พื้นที่'] = df['พื้นที่'].astype(str).str.strip()
 df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
 df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
@@ -139,7 +152,6 @@ with col_chart:
             yaxis=dict(title=None, showgrid=False), font=dict(family="Sarabun", size=16, color="#1E293B")
         )
         fig.update_traces(textposition='outside', textfont=dict(weight='bold', color='#1E293B', size=16))
-        # ปรับความสูงเล็กน้อยเพื่อไม่ให้ล้นหน้า A4
         st.plotly_chart(fig, use_container_width=True, height=300)
 
 with col_map:
@@ -171,7 +183,6 @@ with col_map:
                 icon=folium.Icon(color=marker_color, icon="warning-sign")
             ).add_to(m)
 
-    # ปรับความสูงแผนที่เป็น 300px ให้พอดีกับหน้ากระดาษแนวตั้ง A4 หน้าแรก
     st_folium(m, height=300, use_container_width=True, returned_objects=[]) 
 
 # ==========================================
@@ -185,14 +196,17 @@ st.dataframe(df, use_container_width=True, hide_index=True)
 # ==========================================
 st.markdown('<p class="section-header">✏️ สำหรับเจ้าหน้าที่: จัดการข้อมูล (ซ่อนอัตโนมัติเมื่อพิมพ์ PDF)</p>', unsafe_allow_html=True)
 
+# 🌟 แสดงตารางดึงข้อมูลมาจากตัวแปรไฟล์กลาง เพื่อให้ผู้ใช้กดแก้ไข/ลบ แถวได้แบบสดๆ
 edited_df = st.data_editor(
-    st.session_state.hazard_data,
+    df,
     use_container_width=True, num_rows="dynamic", height=200, key="editor"
 )
+
+# 🌟 ปุ่มแก้ไขระบบแบบ Real-time ร่วมกันทุกคน
 if st.button("🔄 อัปเดตและบันทึกการแก้ไข", use_container_width=True):
-    st.session_state.hazard_data = edited_df
-    st.success("✅ บันทึกการแก้ไขข้อมูลเรียบร้อยแล้ว!")
-    st.rerun()
+    edited_df.to_csv(DATA_FILE, index=False) # เซฟทับฐานข้อมูลกลางที่เป็นไฟล์ CSV ทันที
+    st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว! ผู้ใช้แอปทุกคนจะเห็นข้อมูลล่าสุดนี้ร่วมกันทันที")
+    st.rerun() # บังคับหน้าจอรันใหม่เพื่อดึงพิกัด กราฟ และแผนที่ขึ้นมาคำนวณใหม่แบบ Real-time
 
 col_upload, col_manual = st.columns(2)
 with col_upload:
@@ -202,7 +216,9 @@ with col_upload:
             if uploaded_file.name.endswith('.csv'): df_new = pd.read_csv(uploaded_file)
             elif uploaded_file.name.endswith('.xlsx'): df_new = pd.read_excel(uploaded_file)
             if st.button("➕ ยืนยันผสานข้อมูลเข้าระบบ", type="primary"):
-                st.session_state.hazard_data = pd.concat([st.session_state.hazard_data, df_new], ignore_index=True)
+                combined_df = pd.concat([df, df_new], ignore_index=True)
+                combined_df.to_csv(DATA_FILE, index=False) # เซฟเข้าไฟล์กลาง
+                st.success("ผสานไฟล์นำเข้าเรียบร้อย!")
                 st.rerun()
 
 with col_manual:
@@ -227,7 +243,8 @@ with col_manual:
                     "วัน/เดือน/ปี": input_date.strftime("%Y-%m-%d"), "เวลา ที่เกิดเหตุ": input_time.strftime("%H:%M"), 
                     "ค่าใช้จ่าย": input_cost, "Latitude": input_lat, "Longitude": input_lon,
                     "ผลกระทบ(นาที)": input_impact, "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": input_remark}])
-                st.session_state.hazard_data = pd.concat([st.session_state.hazard_data, new_row], ignore_index=True)
+                combined_df = pd.concat([df, new_row], ignore_index=True)
+                combined_df.to_csv(DATA_FILE, index=False) # เซฟเข้าไฟล์กลางเพื่อให้ทุกคนเห็นตรงกัน
                 st.rerun()
 
 # ==========================================
@@ -236,6 +253,6 @@ with col_manual:
 st.markdown("""
     <div class="app-footer">
         <b>ออกแบบโดย :</b> วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา<br>
-        <span style="color: gray; font-size: 14px;">Version 1.17</span>
+        <span style="color: gray; font-size: 14px;">Version 1.17 (Shared-Database Edition)</span>
     </div>
 """, unsafe_allow_html=True)
