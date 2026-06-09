@@ -7,7 +7,7 @@ import plotly.express as px
 import os
 
 # 1. ตั้งค่าหน้าจอ
-st.set_page_config(page_title="Train Hazards Dashboard V1.17", page_icon="🚆", layout="wide")
+st.set_page_config(page_title="Train Hazards Dashboard V1.17.1", page_icon="🚆", layout="wide")
 
 # 🌟 กำหนดชื่อไฟล์สำหรับเป็นฐานข้อมูลกลาง (Shared Database สำหรับทุกคน)
 DATA_FILE = "hazard_data_shared.csv"
@@ -62,6 +62,11 @@ st.markdown(f"""
     
     .update-date {{ text-align: right; font-size: 18px; color: #475569; font-weight: 600; margin-top: 15px; margin-bottom: 10px; }}
     
+    /* สไตล์กล่องแจ้งเตือนจุดซ้ำ */
+    .danger-box {{
+        background-color: #FEF2F2; border-left: 6px solid #DC2626; padding: 15px; border-radius: 8px; margin-bottom: 15px;
+    }}
+    
     /* 🖨️ คำสั่งพิเศษสำหรับตั้งค่าเครื่องปริ้นและจัดหน้า PDF (A4) 🖨️ */
     @media print {{
         @page {{ size: A4 portrait; margin: 1cm; }}
@@ -78,10 +83,10 @@ st.markdown(f"""
         div[data-testid="metric-container"] {{ border: 1px solid #E2E8F0 !important; box-shadow: none !important; margin-bottom: 10px; }}
         
         /* ป้องกันกราฟและแผนที่ถูกตัดขาดครึ่ง */
-        .stPlotlyChart, iframe {{ page-break-inside: avoid !important; }}
+        .stPlotlyChart, iframe, .danger-box {{ page-break-inside: avoid !important; }}
         
-        /* ดันตารางข้อมูลไปหน้า 2 เพื่อให้หน้าแรกมีแค่ Dashboard สรุป */
-        .stDataFrame {{ page-break-before: always !important; margin-top: 20px; }}
+        /* ดันตารางข้อมูลทั้งหมดไปหน้าถัดไป เพื่อให้หน้าแรกสะอาด */
+        .main-data-table {{ page-break-before: always !important; margin-top: 20px; }}
         
         /* ปรับวันที่ให้อยู่มุมบนขวา */
         .update-date {{ font-size: 14px; margin-top: 0px; }}
@@ -110,9 +115,9 @@ with col_title:
 with col_print:
     st.markdown(f'<p class="update-date">🕒 ปรับปรุงข้อมูล ณ วันที่:<br><span style="color:#1E3A8A;">{thai_date_str}</span></p>', unsafe_allow_html=True)
     if st.button("🖨️ บันทึกรายงาน PDF (A4)", use_container_width=True, type="primary"):
-        st.info("💡 **กดปุ่ม Ctrl + P** หรือ **Cmd + P** แล้วเลือก Save as PDF ระบบได้จัดหน้า 1 เป็นสรุป และหน้า 2 เป็นตารางไว้ให้แล้วครับ")
+        st.info("💡 **กดปุ่ม Ctrl + P** หรือ **Cmd + P** แล้วเลือก Save as PDF ระบบได้จัดกระดาษให้เหมาะกับขนาด A4 เรียบร้อยแล้วครับ")
 
-# 🌟 ดึงข้อมูลจากฐานข้อมูล Shared CSV แทนระบบ Session State เดิมชั่วคราว เพื่อให้ทุกคนเห็นตรงกัน
+# ดึงข้อมูลจากฐานข้อมูล Shared CSV
 df = load_shared_data()
 
 # คลีนนิ่งและแปลงประเภทข้อมูลพื้นฐาน
@@ -126,16 +131,41 @@ df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 delay_sum = pd.to_numeric(df['ผลกระทบ(นาที)'], errors='coerce').fillna(0).sum()
 
+# คัดกรองข้อมูลจุดเกิดเหตุซ้ำเพื่อใช้นับจำนวนและแสดงตาราง
+repeated_cases_mask = df['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'].astype(str).str.contains('ซ้ำ', na=False)
+df_repeated = df[repeated_cases_mask]
+
 kpi1.metric("🚨 จำนวนเหตุการณ์ทั้งหมด", f"{len(df)} ครั้ง")
-repeated_cases = df['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'].astype(str)
-kpi2.metric("⚠️ จุดเกิดเหตุซ้ำ", f"{len(df[repeated_cases.str.contains('ซ้ำ', na=False)])} แห่ง")
+kpi2.metric("⚠️ จุดเกิดเหตุซ้ำ (± 3 Km)", f"{len(df_repeated)} แห่ง")
 kpi3.metric("📍 พื้นที่เสี่ยงสูงสุด", df['พื้นที่'].mode()[0] if not df.empty else "-")
 kpi4.metric("⏱️ ความล่าช้าสะสม", f"{int(delay_sum)} นาที")
 
 st.write("") 
 
 # ==========================================
-# ส่วนที่ 2: กราฟ และ แผนที่ (ปรับขนาดให้พอดี A4)
+# 🌟 ส่วนที่เพิ่มเข้ามาใหม่: ตารางแสดงรายการจุดเกิดเหตุซ้ำ (สำหรับผู้บริหาร) 🌟
+# ==========================================
+st.markdown('<p class="section-header">❌ รายการพื้นที่เฝ้าระวังพิเศษ (จุดที่เกิดเหตุซ้ำซาก ± 3 Km)</p>', unsafe_allow_html=True)
+if not df_repeated.empty:
+    st.markdown(
+        f"""<div class="danger-box">
+            📌 <b>ข้อเสนอแนะเชิงนโยบาย:</b> พบจุดเกิดอุบัติเหตุซ้ำซากจำนวน <b>{len(df_repeated)} แห่ง</b> 
+            ควรประสานงานแขวงบำรุงทางในพื้นที่เพื่อพิจารณาตั้งงบประมาณล้อมรั้วกั้นทางรถไฟ หรือทำเนินดิน/ป้ายเตือนเจ้าของสัตว์ในพิกัดดังกล่าวโดยด่วน
+        </div>""", unsafe_allow_html=True
+    )
+    # แสดงตารางเฉพาะคอลัมน์สำคัญที่ผู้บริหารต้องการวิเคราะห์จุดซ้ำ
+    st.dataframe(
+        df_repeated[["ชื่อเหตุอันตราย", "พื้นที่", "ที่ กม.", "วัน/เดือน/ปี", "ผลกระทบ(นาที)", "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"]], 
+        use_container_width=True, 
+        hide_index=True
+    )
+else:
+    st.success("✅ ปัจจุบันยังไม่พบข้อมูลจุดเกิดเหตุซ้ำซากในระบบ")
+
+st.write("")
+
+# ==========================================
+# ส่วนที่ 3: กราฟ และ แผนที่ (ปรับขนาดให้พอดี A4)
 # ==========================================
 col_chart, col_map = st.columns([1, 1.2])
 
@@ -186,27 +216,29 @@ with col_map:
     st_folium(m, height=300, use_container_width=True, returned_objects=[]) 
 
 # ==========================================
-# ส่วนที่ 3: ตารางข้อมูล (จะถูกปัดไปหน้า 2 อัตโนมัติเมื่อปริ้นท์)
+# ส่วนที่ 4: ตารางข้อมูลดิบทั้งหมด (จะถูกปัดไปหน้าถัดไปเมื่อพิมพ์รายงาน)
 # ==========================================
-st.markdown('<p class="section-header">📋 รายละเอียดข้อมูลเหตุการณ์ทั้งหมด</p>', unsafe_allow_html=True)
+st.markdown('<div class="main-data-table">', unsafe_allow_html=True)
+st.markdown('<p class="section-header">📋 รายละเอียดข้อมูลเหตุการณ์ทั้งหมดในระบบ</p>', unsafe_allow_html=True)
 st.dataframe(df, use_container_width=True, hide_index=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# ส่วนที่ 4: สำหรับเจ้าหน้าที่ (ซ่อนเมื่อ Print)
+# ส่วนที่ 5: สำหรับเจ้าหน้าที่ (ซ่อนเมื่อ Print และ อัปเดตข้อมูลแบบสดๆ ร่วมกัน)
 # ==========================================
 st.markdown('<p class="section-header">✏️ สำหรับเจ้าหน้าที่: จัดการข้อมูล (ซ่อนอัตโนมัติเมื่อพิมพ์ PDF)</p>', unsafe_allow_html=True)
 
-# 🌟 แสดงตารางดึงข้อมูลมาจากตัวแปรไฟล์กลาง เพื่อให้ผู้ใช้กดแก้ไข/ลบ แถวได้แบบสดๆ
+# แสดงตารางแก้ไขฐานข้อมูลกลาง
 edited_df = st.data_editor(
     df,
     use_container_width=True, num_rows="dynamic", height=200, key="editor"
 )
 
-# 🌟 ปุ่มแก้ไขระบบแบบ Real-time ร่วมกันทุกคน
-if st.button("🔄 อัปเดตและบันทึกการแก้ไข", use_container_width=True):
-    edited_df.to_csv(DATA_FILE, index=False) # เซฟทับฐานข้อมูลกลางที่เป็นไฟล์ CSV ทันที
-    st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว! ผู้ใช้แอปทุกคนจะเห็นข้อมูลล่าสุดนี้ร่วมกันทันที")
-    st.rerun() # บังคับหน้าจอรันใหม่เพื่อดึงพิกัด กราฟ และแผนที่ขึ้นมาคำนวณใหม่แบบ Real-time
+# ปุ่มบันทึกระบบและสั่ง Rerun ทันทีเพื่ออัปเดต Dashboard ของทุกคนแบบ Real-time
+if st.button("🔄 อัปเดตและบันทึกการแก้ไขข้อมูล", use_container_width=True):
+    edited_df.to_csv(DATA_FILE, index=False) # เซฟทับไฟล์ CSV กลางทันที
+    st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว! ข้อมูลตัวเลข กราฟ และตารางจุดซ้ำได้อัปเดตแบบ Real-time แล้ว")
+    st.rerun()
 
 col_upload, col_manual = st.columns(2)
 with col_upload:
@@ -217,7 +249,7 @@ with col_upload:
             elif uploaded_file.name.endswith('.xlsx'): df_new = pd.read_excel(uploaded_file)
             if st.button("➕ ยืนยันผสานข้อมูลเข้าระบบ", type="primary"):
                 combined_df = pd.concat([df, df_new], ignore_index=True)
-                combined_df.to_csv(DATA_FILE, index=False) # เซฟเข้าไฟล์กลาง
+                combined_df.to_csv(DATA_FILE, index=False)
                 st.success("ผสานไฟล์นำเข้าเรียบร้อย!")
                 st.rerun()
 
@@ -244,15 +276,15 @@ with col_manual:
                     "ค่าใช้จ่าย": input_cost, "Latitude": input_lat, "Longitude": input_lon,
                     "ผลกระทบ(นาที)": input_impact, "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": input_remark}])
                 combined_df = pd.concat([df, new_row], ignore_index=True)
-                combined_df.to_csv(DATA_FILE, index=False) # เซฟเข้าไฟล์กลางเพื่อให้ทุกคนเห็นตรงกัน
+                combined_df.to_csv(DATA_FILE, index=False)
                 st.rerun()
 
 # ==========================================
-# ส่วนที่ 5: Footer
+# ส่วนที่ 6: Footer
 # ==========================================
 st.markdown("""
     <div class="app-footer">
         <b>ออกแบบโดย :</b> วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา<br>
-        <span style="color: gray; font-size: 14px;">Version 1.17 (Shared-Database Edition)</span>
+        <span style="color: gray; font-size: 14px;">Version 1.17.1 (Shared-Database Edition)</span>
     </div>
 """, unsafe_allow_html=True)
