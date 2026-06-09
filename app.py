@@ -6,19 +6,36 @@ import datetime
 import plotly.express as px
 import os
 
-# 1. ตั้งค่าหน้าจอ
-st.set_page_config(page_title="Train Hazards Dashboard V1.17.1", page_icon="🚆", layout="wide")
+# 1. ตั้งค่าหน้าจอแบบกว้างพิเศษเพื่อความภูมิฐาน
+st.set_page_config(page_title="Train Hazards Executive Dashboard V1.17.2", page_icon="🚆", layout="wide")
 
-# 🌟 กำหนดชื่อไฟล์สำหรับเป็นฐานข้อมูลกลาง (Shared Database สำหรับทุกคน)
+# ฐานข้อมูลกลาง (Shared Database สำหรับทุกคน)
 DATA_FILE = "hazard_data_shared.csv"
 
-# 🌟 ฟังก์ชันสำหรับโหลดข้อมูลกลาง หรือสร้างข้อมูลเริ่มต้นหากยังไม่มีไฟล์
-def load_shared_data():
+# ฟังก์ชันแปลงวันที่ให้เป็น วัน เดือน ปี พ.ศ. ไทย สำหรับแสดงผล
+def convert_to_thai_date(date_str):
+    try:
+        # พยายาม parse วันที่รองรับหลายฟอร์แมต
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+            try:
+                dt = datetime.datetime.strptime(str(date_str).strip(), fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return date_str # หากแปลงไม่ได้ให้ส่งค่าเดิมกลับไป
+            
+        thai_months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+        return f"{dt.day} {thai_months[dt.month-1]} {dt.year + 543}"
+    except:
+        return date_str
+
+# ฟังก์ชันโหลดและจัดระเบียบข้อมูล (Sort ล่าสุด -> เก่าสุด)
+def load_and_sort_data():
     if os.path.exists(DATA_FILE):
-        return pd.read_csv(DATA_FILE)
+        df = pd.read_csv(DATA_FILE)
     else:
-        # ข้อมูลเริ่มต้นตามโครงสร้างเดิมของ Version 1.17
-        initial_df = pd.DataFrame({
+        df = pd.DataFrame({
             "ชื่อเหตุอันตราย": ["ชนโค ท่าพระ-ขอนแก่น", "เฉี่ยวชนกระบือ บ้านช่อง-หินซ้อน", "ชนโค หนองน้ำขุ่น-บ้านใหม่"],
             "พื้นที่": ["แขวงฯ ขอนแก่น", "แขวงฯ ฉะเชิงเทรา", "แขวงฯ นครราชสีมา"],
             "ที่ กม.": ["345+100", "150+200", "250+500"],
@@ -30,10 +47,23 @@ def load_shared_data():
             "ผลกระทบ(นาที)": [15, 30, 10], 
             "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": ["-", "ซ้ำ ± 3 Km", "-"]
         })
-        initial_df.to_csv(DATA_FILE, index=False)
-        return initial_df
+        df.to_csv(DATA_FILE, index=False)
+    
+    # แปลงคอลัมน์วันที่ให้เป็น datetime เพื่อใช้ในการ Sort ลำดับ
+    for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
+        try:
+            df['temp_date'] = pd.to_datetime(df['วัน/เดือน/ปี'], format=fmt)
+            break
+        except:
+            continue
+    else:
+        df['temp_date'] = pd.to_datetime(df['วัน/เดือน/ปี'], errors='coerce')
+        
+    # เรียงลำดับจาก ล่าสุด ไปหา เก่าสุด
+    df = df.sort_values(by='temp_date', ascending=False).drop(columns=['temp_date'])
+    return df
 
-# --- 🎨 ตกแต่ง UI, ฟอนต์ TH Sarabun และระบบ Print A4 ---
+# --- 🎨 ตกแต่ง UI ระดับ Premium (Corporate & Executive Theme) ---
 background_url = "https://images.unsplash.com/photo-1474487548417-781cb71495f3?q=80&w=2000&auto=format&fit=crop"
 
 st.markdown(f"""
@@ -44,148 +74,164 @@ st.markdown(f"""
     #MainMenu {{visibility: hidden;}} footer {{visibility: hidden;}} header {{visibility: hidden;}}
     
     .stApp {{ 
-        background-image: linear-gradient(rgba(248, 250, 252, 0.85), rgba(248, 250, 252, 0.95)), url("{background_url}");
+        background-image: linear-gradient(rgba(244, 246, 249, 0.90), rgba(244, 246, 249, 0.97)), url("{background_url}");
         background-size: cover; background-position: center; background-attachment: fixed;
     }}
     
+    /* สไตล์กล่อง KPI แบบผู้บริหาร */
     div[data-testid="metric-container"] {{
-        background-color: rgba(255, 255, 255, 0.9); border-radius: 12px; padding: 15px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-left: 6px solid #B91C1C; backdrop-filter: blur(10px);
+        background: rgb(255,255,255);
+        background: linear-gradient(135deg, rgba(255,255,255,1) 0%, rgba(248,250,252,1) 100%);
+        border-radius: 14px; padding: 18px;
+        box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.05), 0 8px 10px -6px rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(226, 232, 240, 0.8);
+        border-top: 4px solid #1E3A8A;
     }}
-    div[data-testid="stMetricValue"] {{ font-size: 32px !important; font-weight: 800 !important; color: #0F172A !important; }}
-    div[data-testid="stMetricLabel"] {{ font-size: 18px !important; font-weight: 600 !important; color: #475569 !important; }}
+    div[data-testid="stMetricValue"] {{ font-size: 34px !important; font-weight: 800 !important; color: #1E3A8A !important; }}
+    div[data-testid="stMetricLabel"] {{ font-size: 16px !important; font-weight: 600 !important; color: #475569 !important; text-transform: uppercase; letter-spacing: 0.5px; }}
     
-    .dashboard-title {{ font-size: 34px; font-weight: 800; color: #1E3A8A; margin-bottom: 0px; text-shadow: 1px 1px 2px rgba(255,255,255,0.8);}}
-    .dashboard-subtitle {{ font-size: 18px; color: #334155; margin-bottom: 10px; font-weight: bold;}}
-    .section-header {{ font-size: 22px; font-weight: bold; color: #1E293B; margin-top: 15px; border-bottom: 2px solid rgba(0,0,0,0.1); padding-bottom: 5px; margin-bottom: 10px;}}
-    .stDataFrame, .stPlotlyChart, div[data-testid="stDataEditor"] {{ background-color: rgba(255,255,255,0.85); border-radius: 10px; padding: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
+    /* หัวข้อและป้ายกำกับ */
+    .dashboard-title {{ font-size: 36px; font-weight: 800; color: #0F172A; margin-bottom: 0px; letter-spacing: -0.5px; }}
+    .dashboard-subtitle {{ font-size: 18px; color: #475569; margin-bottom: 15px; font-weight: 400; }}
+    .section-header {{ font-size: 22px; font-weight: 700; color: #1E3A8A; margin-top: 20px; border-bottom: 2px solid #E2E8F0; padding-bottom: 8px; margin-bottom: 12px; }}
     
-    .update-date {{ text-align: right; font-size: 18px; color: #475569; font-weight: 600; margin-top: 15px; margin-bottom: 10px; }}
-    
-    /* สไตล์กล่องแจ้งเตือนจุดซ้ำ */
-    .danger-box {{
-        background-color: #FEF2F2; border-left: 6px solid #DC2626; padding: 15px; border-radius: 8px; margin-bottom: 15px;
+    /* คอมโพเนนต์การแสดงผล */
+    .stDataFrame, .stPlotlyChart, div[data-testid="stDataEditor"], .leaflet-container {{ 
+        background-color: #FFFFFF !important; border-radius: 14px !important; padding: 12px; 
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
+        border: 1px solid #E2E8F0 !important;
     }}
     
-    /* 🖨️ คำสั่งพิเศษสำหรับตั้งค่าเครื่องปริ้นและจัดหน้า PDF (A4) 🖨️ */
+    .update-date {{ text-align: right; font-size: 16px; color: #64748B; font-weight: 500; margin-top: 15px; }}
+    .danger-box {{ background-color: #FFF5F5; border-left: 6px solid #E11D48; padding: 16px; border-radius: 10px; margin-bottom: 15px; color: #9F1239; font-size: 16px; }}
+    
+    /* ปรับแต่งปุ่มกดสไตล์พรีเมียม */
+    .sub-toggle-btn {{
+        background-color: #FFFFFF; border: 1px solid #CBD5E1; padding: 12px 20px; 
+        border-radius: 8px; font-weight: 600; color: #334155; display: inline-block; margin-bottom: 15px;
+    }}
+
     @media print {{
         @page {{ size: A4 portrait; margin: 1cm; }}
         .stApp {{ background-image: none !important; background-color: white !important; }}
-        
-        /* ซ่อนสิ่งที่ไม่จำเป็นสำหรับผู้บริหาร */
         .stButton, .stExpander, div[data-testid="stDataEditor"], div[data-testid="stToolbar"], .app-footer {{ display: none !important; }}
-        
-        /* บังคับสีกราฟและพื้นหลัง */
         * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }}
-        
-        /* ปรับกล่อง KPI ให้เรียง 4 ช่องสวยงามบน A4 */
-        div[data-testid="stMetricValue"] {{ font-size: 24px !important; }}
-        div[data-testid="metric-container"] {{ border: 1px solid #E2E8F0 !important; box-shadow: none !important; margin-bottom: 10px; }}
-        
-        /* ป้องกันกราฟและแผนที่ถูกตัดขาดครึ่ง */
-        .stPlotlyChart, iframe, .danger-box {{ page-break-inside: avoid !important; }}
-        
-        /* ดันตารางข้อมูลทั้งหมดไปหน้าถัดไป เพื่อให้หน้าแรกสะอาด */
         .main-data-table {{ page-break-before: always !important; margin-top: 20px; }}
-        
-        /* ปรับวันที่ให้อยู่มุมบนขวา */
-        .update-date {{ font-size: 14px; margin-top: 0px; }}
     }}
     
-    .app-footer {{ text-align: center; padding: 20px; margin-top: 40px; font-size: 16px; color: #475569; border-top: 1px solid rgba(0,0,0,0.1); background-color: rgba(255,255,255,0.6); border-radius: 10px; }}
+    .app-footer {{ text-align: center; padding: 25px; margin-top: 50px; font-size: 15px; color: #64748B; border-top: 1px solid #E2E8F0; }}
     </style>
 """, unsafe_allow_html=True)
 
-# ==========================================
-# สร้างระบบวันที่และเวลาปัจจุบันแบบภาษาไทย
-# ==========================================
+# ระบบวันที่อัปเดตภาษาไทยแบบเป็นทางการ
 now = datetime.datetime.now()
 thai_months = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
 thai_date_str = f"{now.day} {thai_months[now.month-1]} {now.year+543} เวลา {now.strftime('%H:%M')} น."
 
 # ==========================================
-# ส่วนหัว (Header) & มุมขวาบน
+# ส่วนหัว (Executive Header)
 # ==========================================
-col_title, col_print = st.columns([3, 1.2])
+col_title, col_print = st.columns([3.2, 1])
 
 with col_title:
-    st.markdown('<p class="dashboard-title">🛡️ Safety First: Train Hazards Report</p>', unsafe_allow_html=True)
-    st.markdown('<p class="dashboard-subtitle">รายงานสรุปภาพรวมอุบัติเหตุรถไฟเฉี่ยวชนสัตว์ (Executive Summary)</p>', unsafe_allow_html=True)
+    st.markdown('<p class="dashboard-title">🚆 สรุปสถานการณ์อุบัติเหตุรถไฟเฉี่ยวชนสัตว์</p>', unsafe_allow_html=True)
+    st.markdown('<p class="dashboard-subtitle">รายงานวิเคราะห์เชิงพื้นที่และข้อมูลสถิติสำหรับผู้บริหาร (Executive Intelligence Report)</p>', unsafe_allow_html=True)
 
 with col_print:
-    st.markdown(f'<p class="update-date">🕒 ปรับปรุงข้อมูล ณ วันที่:<br><span style="color:#1E3A8A;">{thai_date_str}</span></p>', unsafe_allow_html=True)
-    if st.button("🖨️ บันทึกรายงาน PDF (A4)", use_container_width=True, type="primary"):
-        st.info("💡 **กดปุ่ม Ctrl + P** หรือ **Cmd + P** แล้วเลือก Save as PDF ระบบได้จัดกระดาษให้เหมาะกับขนาด A4 เรียบร้อยแล้วครับ")
+    st.markdown(f'<p class="update-date">🕒 ข้อมูลอัปเดตล่าสุด:<br><span style="color:#1E3A8A; font-weight:700;">{thai_date_str}</span></p>', unsafe_allow_html=True)
+    if st.button("🖨️ ส่งออกรายงานเป็น PDF (A4)", use_container_width=True, type="primary"):
+        st.info("💡 **คำแนะนำผู้บริหาร:** กดปุ่ม **Ctrl + P** (Windows) หรือ **Cmd + P** (Mac) แล้วเลือก 'Save as PDF' เพื่อพิมพ์รายงานจัดหน้าขนาด A4 ทันที")
 
-# ดึงข้อมูลจากฐานข้อมูล Shared CSV
-df = load_shared_data()
-
-# คลีนนิ่งและแปลงประเภทข้อมูลพื้นฐาน
+# โหลดข้อมูลและจัดลำดับล่าสุดขึ้นก่อน
+df = load_and_sort_data()
 df['พื้นที่'] = df['พื้นที่'].astype(str).str.strip()
 df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce')
 df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce')
 
+# เตรียมข้อมูลสำหรับตารางผู้บริหาร (แสดงเป็น ปี พ.ศ. ไทย)
+df_display = df.copy()
+df_display['วัน/เดือน/ปี'] = df_display['วัน/เดือน/ปี'].apply(convert_to_thai_date)
+
 # ==========================================
-# ส่วนที่ 1: สรุปตัวเลขสำคัญ (KPIs)
+# ส่วนที่ 1: สรุปสถิติตัวเลขสำคัญ (KPIs)
 # ==========================================
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 delay_sum = pd.to_numeric(df['ผลกระทบ(นาที)'], errors='coerce').fillna(0).sum()
 
-# คัดกรองข้อมูลจุดเกิดเหตุซ้ำเพื่อใช้นับจำนวนและแสดงตาราง
+# คัดกรองข้อมูลจุดซ้ำ
 repeated_cases_mask = df['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'].astype(str).str.contains('ซ้ำ', na=False)
-df_repeated = df[repeated_cases_mask]
+df_repeated = df_display[repeated_cases_mask]
 
-kpi1.metric("🚨 จำนวนเหตุการณ์ทั้งหมด", f"{len(df)} ครั้ง")
-kpi2.metric("⚠️ จุดเกิดเหตุซ้ำ (± 3 Km)", f"{len(df_repeated)} แห่ง")
-kpi3.metric("📍 พื้นที่เสี่ยงสูงสุด", df['พื้นที่'].mode()[0] if not df.empty else "-")
-kpi4.metric("⏱️ ความล่าช้าสะสม", f"{int(delay_sum)} นาที")
+kpi1.metric("🚨 เหตุการณ์สะสม", f"{len(df)} ครั้ง")
+kpi2.metric("⚠️ พิกัดเกิดเหตุซ้ำ (± 3 Km)", f"{len(df_repeated)} แห่ง")
+kpi3.metric("📍 พื้นที่วิกฤตสูงสุด", df['พื้นที่'].mode()[0] if not df.empty else "-")
+kpi4.metric("⏱️ ความล่าช้ารวมขบวน", f"{int(delay_sum)} นาที")
 
 st.write("") 
 
 # ==========================================
-# 🌟 ส่วนที่เพิ่มเข้ามาใหม่: ตารางแสดงรายการจุดเกิดเหตุซ้ำ (สำหรับผู้บริหาร) 🌟
+# 🌟 ข้อ 1: ปุ่มกดแสดงข้อมูลจุดเกิดเหตุซ้ำ (Toggle Button)
 # ==========================================
-st.markdown('<p class="section-header">❌ รายการพื้นที่เฝ้าระวังพิเศษ (จุดที่เกิดเหตุซ้ำซาก ± 3 Km)</p>', unsafe_allow_html=True)
-if not df_repeated.empty:
-    st.markdown(
-        f"""<div class="danger-box">
-            📌 <b>ข้อเสนอแนะเชิงนโยบาย:</b> พบจุดเกิดอุบัติเหตุซ้ำซากจำนวน <b>{len(df_repeated)} แห่ง</b> 
-            ควรประสานงานแขวงบำรุงทางในพื้นที่เพื่อพิจารณาตั้งงบประมาณล้อมรั้วกั้นทางรถไฟ หรือทำเนินดิน/ป้ายเตือนเจ้าของสัตว์ในพิกัดดังกล่าวโดยด่วน
-        </div>""", unsafe_allow_html=True
-    )
-    # แสดงตารางเฉพาะคอลัมน์สำคัญที่ผู้บริหารต้องการวิเคราะห์จุดซ้ำ
-    st.dataframe(
-        df_repeated[["ชื่อเหตุอันตราย", "พื้นที่", "ที่ กม.", "วัน/เดือน/ปี", "ผลกระทบ(นาที)", "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"]], 
-        use_container_width=True, 
-        hide_index=True
-    )
+st.markdown('<p class="section-header">❌ พื้นที่เฝ้าระวังพิเศษ (พิกัดที่เกิดเหตุซ้ำซาก)</p>', unsafe_allow_html=True)
+
+# ใช้ st.checkbox ตกแต่งเพื่อเป็นสวิตช์เปิดปิดข้อมูลจุดซ้ำ
+show_repeated = st.checkbox("🔍 คลิกที่นี่ เพื่อเปิด/ปิด ตารางแสดงรายละเอียดจุดเกิดเหตุซ้ำสะสม", value=False)
+
+if show_repeated:
+    if not df_repeated.empty:
+        st.markdown(
+            f"""<div class="danger-box">
+                <b>📌 รายงานด่วนเชิงนโยบาย:</b> ปัจจุบันพบจุดเกิดอุบัติเหตุซ้ำซากในรัศมี 3 กิโลเมตร จำนวน <b>{len(df_repeated)} พิกัด</b> 
+                ฝ่ายการช่างโยธาเสนอแนะให้กำหนดมาตรการเร่งด่วนในการสร้างรั้วกั้นเขตกรรรมสิทธิ์หรือทำเนินดินเสริมความปลอดภัยร่วมกับชุมชนโดยรอบ
+            </div>""", unsafe_allow_html=True
+        )
+        st.dataframe(
+            df_repeated[["ชื่อเหตุอันตราย", "พื้นที่", "ที่ กม.", "วัน/เดือน/ปี", "เวลา ที่เกิดเหตุ", "ผลกระทบ(นาที)", "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"]], 
+            use_container_width=True, hide_index=True
+        )
+    else:
+        st.success("✅ จากการตรวจสอบ ไม่พบพิกัดที่เกิดเหตุซ้ำซากในระบบ ณ ขณะนี้")
 else:
-    st.success("✅ ปัจจุบันยังไม่พบข้อมูลจุดเกิดเหตุซ้ำซากในระบบ")
+    st.info("💡 ข้อมูลรายละเอียดจุดเกิดเหตุซ้ำซากถูกซ่อนอยู่ (คลิกที่ช่องทำเครื่องหมายด้านบนเพื่อเปิดแสดงข้อมูล)")
 
 st.write("")
 
 # ==========================================
-# ส่วนที่ 3: กราฟ และ แผนที่ (ปรับขนาดให้พอดี A4)
+# 🌟 ข้อ 3 & 4: ปรับปรุงกราฟให้ดูง่ายกรณีมีหลายแขวง + แผนที่ที่สวยงาม
 # ==========================================
-col_chart, col_map = st.columns([1, 1.2])
+col_chart, col_map = st.columns([1.1, 1.1])
 
 with col_chart:
-    st.markdown('<p class="section-header">📊 สถิติความเสี่ยงจำแนกตามพื้นที่</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">📊 ลำดับความเสี่ยงจำแนกตามแขวงบำรุงทาง</p>', unsafe_allow_html=True)
     if not df.empty:
+        # นับจำนวนและจัดเรียงจากมากไปน้อยที่สุดเสมอ
         area_counts = df['พื้นที่'].value_counts().reset_index()
-        area_counts.columns = ['พื้นที่', 'จำนวน']
+        area_counts.columns = ['พื้นที่', 'จำนวนเหตุการณ์']
+        area_counts = area_counts.sort_values(by='จำนวนเหตุการณ์', ascending=True) # Ascending true เพื่อให้แท่งด้านบนสูงสุดเมื่อทำกราฟแนวนอน
         
-        fig = px.bar(area_counts, x='จำนวน', y='พื้นที่', orientation='h', text='จำนวน', color_discrete_sequence=['#DC2626']) 
+        # 💡 ปรับปรุงกราฟ: ใช้ Color scale (ไล่สีโทนเข้ม-อ่อนตามระดับความวิกฤต) เพื่อรองรับกรณีมีหลายแขวงให้ดูง่ายขึ้น
+        fig = px.bar(
+            area_counts, x='จำนวนเหตุการณ์', y='พื้นที่', orientation='h', text='จำนวนเหตุการณ์',
+            color='จำนวนเหตุการณ์', color_continuous_scale=['#FCA5A5', '#EF4444', '#991B1B'], # ไล่ระดับสีแดงเพื่อบอกความเสี่ยง
+            labels={'จำนวนเหตุการณ์': 'จำนวนครั้ง'}
+        ) 
+        
+        # 💡 คำนวณความสูงกราฟแบบไดนามิก: ยิ่งแขวงเยอะ กราฟจะยืดสูงขึ้นตามอัตโนมัติเพื่อไม่ให้ตัวหนังสือทับกัน
+        dynamic_height = max(300, len(area_counts) * 45)
+        
         fig.update_layout(
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=20, t=10, b=0), xaxis=dict(showgrid=False, visible=False), 
-            yaxis=dict(title=None, showgrid=False), font=dict(family="Sarabun", size=16, color="#1E293B")
+            margin=dict(l=10, r=30, t=10, b=10), 
+            xaxis=dict(showgrid=True, gridcolor='#E2E8F0', title="จำนวนครั้งที่เกิดเหตุ"), 
+            yaxis=dict(title=None, showgrid=False), 
+            font=dict(family="Sarabun", size=14, color="#1E293B"),
+            coloraxis_showscale=False # ซ่อนแถบแถบสีด้านข้างเพื่อให้หน้าจอสะอาด
         )
-        fig.update_traces(textposition='outside', textfont=dict(weight='bold', color='#1E293B', size=16))
-        st.plotly_chart(fig, use_container_width=True, height=300)
+        fig.update_traces(textposition='outside', textfont=dict(weight='bold', size=14))
+        st.plotly_chart(fig, use_container_width=True, height=dynamic_height)
 
 with col_map:
-    st.markdown('<p class="section-header">🗺️ แผนที่พิกัดภาพรวมทุกจุด</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">🗺️ แผนที่พิกัดภาพรวมภูมิศาสตร์ภูมิภาค</p>', unsafe_allow_html=True)
     valid_coords = df.dropna(subset=['Latitude', 'Longitude'])
     if not valid_coords.empty:
         center_lat, center_lon = valid_coords["Latitude"].mean(), valid_coords["Longitude"].mean()
@@ -193,19 +239,21 @@ with col_map:
         center_lat, center_lon = 13.7367, 100.5231
         
     m = folium.Map(location=[center_lat, center_lon], zoom_start=6, 
-                   tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', attr='Google')
+                   tiles='https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', attr='Google Base Map')
     
     for idx, row in df.iterrows():
         if pd.notna(row['Latitude']) and pd.notna(row['Longitude']):
             is_repeated = "ซ้ำ" in str(row['หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)'])
+            # 💡 ใช้สีแดงเข้มพิเศษ (Darkred) สำหรับจุดซ้ำให้เด่นชัดตัดกับจุดปกติที่เป็นสีแดงทั่วไป
             marker_color = "darkred" if is_repeated else "red" 
             
             popup_html = f"""
-            <div style='font-family:Sarabun; font-size:16px; min-width:200px;'>
-                <b>{row['ชื่อเหตุอันตราย']}</b><br>
-                <span style='color:gray;'>พื้นที่: {row['พื้นที่']}</span><br>
-                <hr style='margin:5px 0;'>
-                เวลา: {row['วัน/เดือน/ปี']} ({row['เวลา ที่เกิดเหตุ']} น.)
+            <div style='font-family:Sarabun; font-size:15px; min-width:200px; padding:5px;'>
+                <b style='color:#1E3A8A;'>{row['ชื่อเหตุอันตราย']}</b><br>
+                <span style='color:#475569;'><b>หน่วยงาน:</b> {row['พื้นที่']}</span><br>
+                <span style='color:#475569;'><b>พิกัด กม.:</b> {row['ที่ กม.']}</span><br>
+                <hr style='margin:5px 0; border:0; border-top:1px solid #CBD5E1;'>
+                <b>วันที่เกิดเหตุ:</b> {convert_to_thai_date(row['วัน/เดือน/ปี'])}
             </div>
             """
             folium.Marker(
@@ -213,64 +261,64 @@ with col_map:
                 icon=folium.Icon(color=marker_color, icon="warning-sign")
             ).add_to(m)
 
-    st_folium(m, height=300, use_container_width=True, returned_objects=[]) 
+    st_folium(m, height=dynamic_height, use_container_width=True, returned_objects=[]) 
 
 # ==========================================
-# ส่วนที่ 4: ตารางข้อมูลดิบทั้งหมด (จะถูกปัดไปหน้าถัดไปเมื่อพิมพ์รายงาน)
+# 🌟 ข้อ 2: ตารางแสดงข้อมูลรวม (เรียงลำดับจาก ล่าสุด -> เก่าสุด และปี พ.ศ. ไทย)
 # ==========================================
 st.markdown('<div class="main-data-table">', unsafe_allow_html=True)
-st.markdown('<p class="section-header">📋 รายละเอียดข้อมูลเหตุการณ์ทั้งหมดในระบบ</p>', unsafe_allow_html=True)
-st.dataframe(df, use_container_width=True, hide_index=True)
+st.markdown('<p class="section-header">📋 ทะเบียนประวัติข้อมูลเหตุการณ์ทั้งหมด (เรียงลำดับล่าสุด)</p>', unsafe_allow_html=True)
+st.dataframe(df_display, use_container_width=True, hide_index=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# ส่วนที่ 5: สำหรับเจ้าหน้าที่ (ซ่อนเมื่อ Print และ อัปเดตข้อมูลแบบสดๆ ร่วมกัน)
+# ส่วนที่ 5: ระบบจัดการข้อมูลสำหรับผู้ใช้ (ซ่อนเมื่อพิมพ์รายงานเป็น PDF)
 # ==========================================
-st.markdown('<p class="section-header">✏️ สำหรับเจ้าหน้าที่: จัดการข้อมูล (ซ่อนอัตโนมัติเมื่อพิมพ์ PDF)</p>', unsafe_allow_html=True)
+st.markdown('<p class="section-header">✏️ ศูนย์จัดการข้อมูลระบบปฏิบัติการ (ซ่อนอัตโนมัติในรายงาน PDF)</p>', unsafe_allow_html=True)
 
-# แสดงตารางแก้ไขฐานข้อมูลกลาง
 edited_df = st.data_editor(
-    df,
-    use_container_width=True, num_rows="dynamic", height=200, key="editor"
+    df, # แก้ไขข้อมูลบนฐานข้อมูลดิบโดยตรง เพื่อรักษารูปแบบเวลาดั้งเดิมในไฟล์ CSV สำหรับคำนวณ
+    use_container_width=True, num_rows="dynamic", height=220, key="editor"
 )
 
-# ปุ่มบันทึกระบบและสั่ง Rerun ทันทีเพื่ออัปเดต Dashboard ของทุกคนแบบ Real-time
-if st.button("🔄 อัปเดตและบันทึกการแก้ไขข้อมูล", use_container_width=True):
-    edited_df.to_csv(DATA_FILE, index=False) # เซฟทับไฟล์ CSV กลางทันที
-    st.success("✅ บันทึกข้อมูลเรียบร้อยแล้ว! ข้อมูลตัวเลข กราฟ และตารางจุดซ้ำได้อัปเดตแบบ Real-time แล้ว")
+# ปุ่มเซฟข้อมูลพร้อมระบบ Real-time รีเฟรชทันที
+if st.button("💾 ยืนยันการอัปเดตและบันทึกฐานข้อมูลร่วมกัน", use_container_width=True):
+    edited_df.to_csv(DATA_FILE, index=False)
+    st.success("✅ บันทึกข้อมูลลงสู่ระบบเรียบร้อย! ข้อมูลสรุปและกราฟวิเคราะห์ได้อัปเดตแบบ Real-time บนหน้าจอของผู้ใช้งานทุกคน")
     st.rerun()
 
+# ฟอร์มการนำเข้าข้อมูล
 col_upload, col_manual = st.columns(2)
 with col_upload:
-    with st.expander("📥 1. นำเข้าข้อมูลจากไฟล์ (.csv, .xlsx)"):
-        uploaded_file = st.file_uploader("ลากไฟล์มาวาง หรือ กดเพื่อเลือกไฟล์", type=["csv", "xlsx"])
+    with st.expander("📥 1. การนำเข้าข้อมูลผ่านไฟล์ (.csv, .xlsx)"):
+        uploaded_file = st.file_uploader("ลากไฟล์ตารางข้อมูลมาวางที่นี่เพื่อผสานข้อมูล", type=["csv", "xlsx"])
         if uploaded_file is not None:
             if uploaded_file.name.endswith('.csv'): df_new = pd.read_csv(uploaded_file)
             elif uploaded_file.name.endswith('.xlsx'): df_new = pd.read_excel(uploaded_file)
-            if st.button("➕ ยืนยันผสานข้อมูลเข้าระบบ", type="primary"):
+            if st.button("➕ ยืนยันประมวลผลและผสานไฟล์", type="primary"):
                 combined_df = pd.concat([df, df_new], ignore_index=True)
                 combined_df.to_csv(DATA_FILE, index=False)
-                st.success("ผสานไฟล์นำเข้าเรียบร้อย!")
+                st.success("ผสานข้อมูลร่วมกันสำเร็จ!")
                 st.rerun()
 
 with col_manual:
-    with st.expander("📝 2. กรอกข้อมูลใหม่ด้วยตัวเอง"):
+    with st.expander("📝 2. บันทึกรายงานเหตุการณ์ใหม่ด้วยตนเอง"):
         with st.form("realtime_input_form"):
-            input_name = st.text_input("ชื่อเหตุอันตราย")
-            input_area = st.text_input("พื้นที่")
-            input_km = st.text_input("ที่ กม.")
+            input_name = st.text_input("ชื่อเหตุอันตราย", placeholder="ตัวอย่างเช่น ชนโค ขบวน 108")
+            input_area = st.text_input("พื้นที่", placeholder="ตัวอย่างเช่น แขวงฯ เพชรบุรี")
+            input_km = st.text_input("ที่ กม.", placeholder="ตัวอย่างเช่น 150+200")
             c1, c2 = st.columns(2)
             with c1:
                 input_date = st.date_input("วัน/เดือน/ปี")
-                input_lat = st.number_input("Latitude", value=13.7367, format="%.5f")
-                input_impact = st.number_input("ผลกระทบ(นาที)", min_value=0, step=1)
+                input_lat = st.number_input("Latitude (ละติจูด)", value=13.7367, format="%.5f")
+                input_impact = st.number_input("ผลกระทบขบวนล่าช้า (นาที)", min_value=0, step=1)
             with c2:
                 input_time = st.time_input("เวลา ที่เกิดเหตุ", value=datetime.time(12, 00))
-                input_lon = st.number_input("Longitude", value=100.5231, format="%.5f")
+                input_lon = st.number_input("Longitude (ลองจิจูด)", value=100.5231, format="%.5f")
                 input_cost = st.text_input("ค่าใช้จ่าย", value="ไม่มีค่าใช้จ่าย")
-            input_remark = st.text_input("หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)", placeholder="เช่น ซ้ำ")
+            input_remark = st.text_input("หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)", placeholder="ระบุ 'ซ้ำ' หากเป็นพื้นที่เกิดเหตุซ้ำ")
                 
-            if st.form_submit_button("💾 ยืนยันบันทึกข้อมูล", type="primary", use_container_width=True):
+            if st.form_submit_button("💾 ยืนยันบันทึกข้อมูลเข้าระบบกลาง", type="primary", use_container_width=True):
                 new_row = pd.DataFrame([{"ชื่อเหตุอันตราย": input_name, "พื้นที่": input_area, "ที่ กม.": input_km,
                     "วัน/เดือน/ปี": input_date.strftime("%Y-%m-%d"), "เวลา ที่เกิดเหตุ": input_time.strftime("%H:%M"), 
                     "ค่าใช้จ่าย": input_cost, "Latitude": input_lat, "Longitude": input_lon,
@@ -280,11 +328,11 @@ with col_manual:
                 st.rerun()
 
 # ==========================================
-# ส่วนที่ 6: Footer
+# ส่วนที่ 6: เครดิตส่วนท้ายระบบ
 # ==========================================
 st.markdown("""
     <div class="app-footer">
-        <b>ออกแบบโดย :</b> วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา<br>
-        <span style="color: gray; font-size: 14px;">Version 1.17.1 (Shared-Database Edition)</span>
+        <b>ระบบสารสนเทศความปลอดภัย :</b> วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา การรถไฟแห่งประเทศไทย<br>
+        <span style="color: #94A3B8; font-size: 13px;">Executive Dashboard Version 1.17.2 (Shared Database Engine)</span>
     </div>
 """, unsafe_allow_html=True)
