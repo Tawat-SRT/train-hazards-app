@@ -7,6 +7,7 @@ import plotly.express as px
 import os
 import base64
 from io import BytesIO
+import numpy as np
 
 # ==========================================
 # CONFIG
@@ -586,7 +587,7 @@ with k5:
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# TIME SERIES ANALYSIS
+# TIME SERIES ANALYSIS (FIXED)
 # ==========================================
 st.markdown('<div class="section-wrap">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">📈 แนวโน้มเหตุการณ์รายเดือน</div>', unsafe_allow_html=True)
@@ -595,31 +596,44 @@ if not df_base.empty:
     df_temp = df_base.copy()
     df_temp["วันที่"] = pd.to_datetime(df_temp["วัน/เดือน/ปี"], errors="coerce")
     df_temp["เดือน"] = df_temp["วันที่"].dt.month
-    df_temp["เดือนไทย"] = df_temp["เดือน"].apply(lambda x: THAI_MONTHS[x-1] if pd.notna(x) else "")
-    monthly_counts = df_temp["เดือนไทย"].value_counts().reset_index()
-    monthly_counts.columns = ["เดือน", "จำนวนเหตุการณ์"]
     
-    month_order = THAI_MONTHS
-    monthly_counts["เดือน"] = pd.Categorical(monthly_counts["เดือน"], categories=month_order, ordered=True)
-    monthly_counts = monthly_counts.sort_values("เดือน")
+    # Fixed: Handle NaN values safely
+    def get_thai_month(month_num):
+        if pd.notna(month_num) and isinstance(month_num, (int, float)) and 1 <= month_num <= 12:
+            return THAI_MONTHS[int(month_num) - 1]
+        return "ไม่ระบุ"
+    
+    df_temp["เดือนไทย"] = df_temp["เดือน"].apply(get_thai_month)
+    
+    # Filter out "ไม่ระบุ" for counting
+    monthly_counts = df_temp[df_temp["เดือนไทย"] != "ไม่ระบุ"]["เดือนไทย"].value_counts().reset_index()
+    
+    if not monthly_counts.empty:
+        monthly_counts.columns = ["เดือน", "จำนวนเหตุการณ์"]
+        
+        month_order = THAI_MONTHS
+        monthly_counts["เดือน"] = pd.Categorical(monthly_counts["เดือน"], categories=month_order, ordered=True)
+        monthly_counts = monthly_counts.sort_values("เดือน")
 
-    fig_line = px.line(
-        monthly_counts,
-        x="เดือน",
-        y="จำนวนเหตุการณ์",
-        markers=True,
-        title="จำนวนเหตุการณ์รายเดือน"
-    )
-    fig_line.update_layout(
-        height=400,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Sarabun", size=12),
-        xaxis_title="เดือน",
-        yaxis_title="จำนวนเหตุการณ์"
-    )
-    fig_line.update_traces(line=dict(color="#2563EB", width=3), marker=dict(size=10, color="#1D4ED8"))
-    st.plotly_chart(fig_line, use_container_width=True)
+        fig_line = px.line(
+            monthly_counts,
+            x="เดือน",
+            y="จำนวนเหตุการณ์",
+            markers=True,
+            title="จำนวนเหตุการณ์รายเดือน"
+        )
+        fig_line.update_layout(
+            height=400,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Sarabun", size=12),
+            xaxis_title="เดือน",
+            yaxis_title="จำนวนเหตุการณ์"
+        )
+        fig_line.update_traces(line=dict(color="#2563EB", width=3), marker=dict(size=10, color="#1D4ED8"))
+        st.plotly_chart(fig_line, use_container_width=True)
+    else:
+        st.info("ไม่พบข้อมูลวันที่ที่ถูกต้องสำหรับแสดงแนวโน้ม")
 else:
     st.info("ไม่พบข้อมูลสำหรับแสดงแนวโน้ม")
 
@@ -836,8 +850,9 @@ temp_filtered = df_base.copy()
 if area_filter != "ทั้งหมด":
     temp_filtered = temp_filtered[temp_filtered["พื้นที่"] == area_filter]
 
-temp_filtered = temp_filtered[(temp_filtered["ผลกระทบ(นาที)"] >= min_impact) & (temp_filtered["ผลกระทบ(นาที)"] <= max_impact)]
-filtered_df = filtered_df[filtered_df["ลำดับที่"].isin(temp_filtered.index + 1)]
+if not temp_filtered.empty:
+    temp_filtered = temp_filtered[(temp_filtered["ผลกระทบ(นาที)"] >= min_impact) & (temp_filtered["ผลกระทบ(นาที)"] <= max_impact)]
+    filtered_df = filtered_df[filtered_df["ลำดับที่"].isin(temp_filtered.index + 1)]
 
 if search_term:
     filtered_df = filtered_df[filtered_df.astype(str).apply(lambda row: row.str.contains(search_term, case=False, na=False).any(), axis=1)]
