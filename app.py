@@ -871,3 +871,105 @@ if enable_management:
         edited_df = st.data_editor(
             df_base[REQUIRED_COLUMNS],
             use_container_width=True,
+            num_rows="dynamic",
+            height=300,
+            key="editor"
+        )
+        
+        if st.button("💾 บันทึกข้อมูลที่แก้ไข", use_container_width=True, type="primary"):
+            cleaned_edited_df = clean_dataframe(edited_df)
+            save_data(cleaned_edited_df)
+            st.success("บันทึกข้อมูลเรียบร้อยแล้ว")
+            st.rerun()
+        
+        col_upload, col_manual = st.columns(2)
+        
+        with col_upload:
+            with st.expander("📥 นำเข้าข้อมูลจากไฟล์"):
+                uploaded_file = st.file_uploader("อัปโหลดไฟล์ .csv หรือ .xlsx", type=["csv", "xlsx"])
+                
+                if uploaded_file is not None:
+                    try:
+                        if uploaded_file.name.endswith(".csv"):
+                            df_new = pd.read_csv(uploaded_file)
+                        else:
+                            df_new = pd.read_excel(uploaded_file)
+                        
+                        st.dataframe(df_new.head(), use_container_width=True, hide_index=True)
+                        
+                        if st.button("➕ ผสานข้อมูลเข้าระบบ", type="secondary", use_container_width=True):
+                            missing_cols = validate_uploaded_columns(df_new)
+                            
+                            if missing_cols:
+                                st.error(f"ไฟล์ที่นำเข้าขาดคอลัมน์: {', '.join(missing_cols)}")
+                            else:
+                                df_new = clean_dataframe(df_new[REQUIRED_COLUMNS])
+                                combined_df = pd.concat([df_base[REQUIRED_COLUMNS], df_new], ignore_index=True)
+                                save_data(combined_df)
+                                st.success("ผสานข้อมูลสำเร็จ")
+                                st.rerun()
+                    
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์: {e}")
+        
+        with col_manual:
+            with st.expander("📝 เพิ่มเหตุการณ์ใหม่"):
+                with st.form("realtime_input_form"):
+                    input_name = st.text_input("ชื่อเหตุอันตราย")
+                    input_area = st.text_input("พื้นที่")
+                    input_km = st.text_input("ที่ กม.")
+                    
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        input_date = st.date_input("วัน/เดือน/ปี")
+                        input_lat = st.number_input("Latitude", value=13.7367, format="%.5f")
+                        input_impact = st.number_input("ผลกระทบ(นาที)", min_value=0, step=1)
+                    with c2:
+                        input_time = st.time_input("เวลา ที่เกิดเหตุ", value=datetime.time(12, 0))
+                        input_lon = st.number_input("Longitude", value=100.5231, format="%.5f")
+                        input_cost = st.text_input("ค่าใช้จ่าย", value="ไม่มีค่าใช้จ่าย")
+                    
+                    input_remark = st.text_input("หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)")
+                    
+                    if st.form_submit_button("💾 บันทึกเหตุการณ์ใหม่", use_container_width=True):
+                        if not input_name.strip() or not input_area.strip() or not input_km.strip():
+                            st.error("กรุณากรอกข้อมูลให้ครบอย่างน้อย: ชื่อเหตุอันตราย, พื้นที่, ที่ กม.")
+                        else:
+                            new_row = pd.DataFrame([{
+                                "ชื่อเหตุอันตราย": input_name.strip(),
+                                "พื้นที่": input_area.strip(),
+                                "ที่ กม.": input_km.strip(),
+                                "วัน/เดือน/ปี": input_date.strftime("%Y-%m-%d"),
+                                "เวลา ที่เกิดเหตุ": input_time.strftime("%H:%M"),
+                                "ค่าใช้จ่าย": input_cost.strip() if str(input_cost).strip() else "ไม่มีค่าใช้จ่าย",
+                                "Latitude": input_lat,
+                                "Longitude": input_lon,
+                                "ผลกระทบ(นาที)": input_impact,
+                                "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": input_remark.strip()
+                            }])
+                            
+                            new_row = clean_dataframe(new_row)
+                            combined_df = pd.concat([df_base[REQUIRED_COLUMNS], new_row], ignore_index=True)
+                            save_data(combined_df)
+                            st.success("เพิ่มข้อมูลใหม่เรียบร้อยแล้ว")
+                            st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    elif password:
+        st.error("รหัสผ่านไม่ถูกต้อง")
+else:
+    st.info("ระบบจัดการข้อมูลถูกซ่อนอยู่เพื่อความปลอดภัยของข้อมูล")
+
+st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ==========================================
+# FOOTER
+# ==========================================
+st.markdown("""
+<div class="app-footer">
+    <b>ระบบสารสนเทศความปลอดภัย</b><br>
+    วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา การรถไฟแห่งประเทศไทย<br>
+    <span style="color:#94A3B8;">Executive Dashboard - Modern Premium UI</span>
+</div>
+""", unsafe_allow_html=True)
