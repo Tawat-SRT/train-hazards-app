@@ -870,4 +870,4 @@ if enable_management:
         
         edited_df = st.data_editor(
             df_base[REQUIRED_COLUMNS],
-           
+            use_container_width=True,
