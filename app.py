@@ -6,6 +6,7 @@ import datetime
 import plotly.express as px
 import os
 import base64
+import re
 
 # ==========================================
 # CONFIG
@@ -25,12 +26,21 @@ THAI_MONTHS = [
     "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
 ]
 
+THAI_MONTH_MAP = {
+    "มกราคม": 1, "กุมภาพันธ์": 2, "มีนาคม": 3, "เมษายน": 4,
+    "พฤษภาคม": 5, "มิถุนายน": 6, "กรกฎาคม": 7, "สิงหาคม": 8,
+    "กันยายน": 9, "ตุลาคม": 10, "พฤศจิกายน": 11, "ธันวาคม": 12
+}
+
 REQUIRED_COLUMNS = [
     "ชื่อเหตุอันตราย",
+    "สาย",
+    "ระหว่างสถานี",
     "พื้นที่",
     "ที่ กม.",
     "วัน/เดือน/ปี",
     "เวลา ที่เกิดเหตุ",
+    "สาเหตุ",
     "ค่าใช้จ่าย",
     "Latitude",
     "Longitude",
@@ -56,19 +66,77 @@ def get_logo_data_url():
         return None
 
 
+def normalize_text(value):
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() == "nan" else text
+
+
+def parse_thai_date(date_str):
+    text = normalize_text(date_str)
+    if not text:
+        return pd.NaT
+
+    text = text.replace("เวลา", "").strip()
+
+    # กรณีไทย เช่น 7 ตุลาคม 2567
+    thai_pattern = r"(\d{1,2})\s+([ก-๙]+)\s+(\d{4})"
+    m = re.search(thai_pattern, text)
+    if m:
+        day = int(m.group(1))
+        month_name = m.group(2)
+        year = int(m.group(3))
+        month = THAI_MONTH_MAP.get(month_name)
+        if month:
+            if year > 2400:
+                year -= 543
+            try:
+                return pd.Timestamp(year=year, month=month, day=day)
+            except Exception:
+                return pd.NaT
+
+    # กรณีอังกฤษ เช่น 3 January 2024, 12-May-67
+    for fmt in [
+        "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d",
+        "%d %B %Y", "%d-%b-%y", "%d-%B-%y", "%d-%b-%Y", "%d-%B-%Y"
+    ]:
+        try:
+            dt = datetime.datetime.strptime(text, fmt)
+            year = dt.year
+            if year < 100:
+                year += 2000
+            return pd.Timestamp(year=year, month=dt.month, day=dt.day)
+        except ValueError:
+            continue
+
+    # fallback
+    dt = pd.to_datetime(text, errors="coerce", dayfirst=True)
+    return dt
+
+
+def parse_time_value(time_str):
+    text = normalize_text(time_str)
+    if not text:
+        return pd.NaT
+
+    text = text.replace("น.", "").replace("น", "").replace(" ", "").strip()
+    text = text.replace(".", ":")
+
+    for fmt in ["%H:%M", "%H:%M:%S"]:
+        try:
+            return pd.to_datetime(text, format=fmt, errors="raise")
+        except Exception:
+            pass
+
+    return pd.to_datetime(text, errors="coerce")
+
+
 def convert_to_thai_date(date_str):
     try:
-        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
-            try:
-                dt = datetime.datetime.strptime(str(date_str).strip(), fmt)
-                return f"{dt.day} {THAI_MONTHS[dt.month - 1]} {dt.year + 543}"
-            except ValueError:
-                continue
-
-        dt = pd.to_datetime(date_str, errors="coerce")
+        dt = parse_thai_date(date_str)
         if pd.notna(dt):
             return f"{dt.day} {THAI_MONTHS[dt.month - 1]} {dt.year + 543}"
-
         return str(date_str)
     except Exception:
         return str(date_str)
@@ -91,18 +159,13 @@ def clean_dataframe(df):
     df = ensure_required_columns(df)
 
     text_cols = [
-        "ชื่อเหตุอันตราย",
-        "พื้นที่",
-        "ที่ กม.",
-        "วัน/เดือน/ปี",
-        "เวลา ที่เกิดเหตุ",
-        "ค่าใช้จ่าย",
+        "ชื่อเหตุอันตราย", "สาย", "ระหว่างสถานี", "พื้นที่", "ที่ กม.",
+        "วัน/เดือน/ปี", "เวลา ที่เกิดเหตุ", "สาเหตุ", "ค่าใช้จ่าย",
         "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"
     ]
     for col in text_cols:
-        df[col] = df[col].astype(str).str.strip()
+        df[col] = df[col].apply(normalize_text)
 
-    df["พื้นที่"] = df["พื้นที่"].replace("nan", "")
     df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
     df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
     df["ผลกระทบ(นาที)"] = pd.to_numeric(df["ผลกระทบ(นาที)"], errors="coerce").fillna(0)
@@ -123,6 +186,7 @@ def build_duplicate_key(df):
 def deduplicate_combined(existing_df, new_df):
     existing = existing_df.copy()
     incoming = new_df.copy()
+
     existing["dup_key"] = build_duplicate_key(existing)
     incoming["dup_key"] = build_duplicate_key(incoming)
 
@@ -140,22 +204,25 @@ def load_data_cached(file_path, mtime):
         df = pd.read_csv(file_path)
     else:
         df = pd.DataFrame({
-            "ชื่อเหตุอันตราย": ["ชนโค ท่าพระ-ขอนแก่น", "เฉี่ยวชนกระบือ บ้านช่อง-หินซ้อน", "ชนโค หนองน้ำขุ่น-บ้านใหม่"],
-            "พื้นที่": ["แขวงฯ ขอนแก่น", "แขวงฯ ฉะเชิงเทรา", "แขวงฯ นครราชสีมา"],
-            "ที่ กม.": ["345+100", "150+200", "250+500"],
-            "วัน/เดือน/ปี": ["2024-02-15", "2024-03-11", "2024-04-05"],
-            "เวลา ที่เกิดเหตุ": ["10:30", "14:45", "08:15"],
-            "ค่าใช้จ่าย": ["ไม่มีค่าใช้จ่าย", "มีค่าใช้จ่าย 5,000 บาท", "ไม่มีค่าใช้จ่าย"],
-            "Latitude": [16.3650, 14.6540, 14.9722],
-            "Longitude": [102.8340, 101.1230, 102.0833],
-            "ผลกระทบ(นาที)": [15, 30, 10],
-            "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": ["-", "ซ้ำ ± 3 Km", "-"]
+            "ชื่อเหตุอันตราย": ["ชนโค ท่าพระ-ขอนแก่น"],
+            "สาย": ["สายหนองคาย"],
+            "ระหว่างสถานี": ["ท่าพระ - ขอนแก่น"],
+            "พื้นที่": ["แขวงบำรุงทางขอนแก่น"],
+            "ที่ กม.": ["345+100"],
+            "วัน/เดือน/ปี": ["2024-02-15"],
+            "เวลา ที่เกิดเหตุ": ["10:30"],
+            "สาเหตุ": [""],
+            "ค่าใช้จ่าย": ["ไม่มีค่าใช้จ่าย"],
+            "Latitude": [16.3650],
+            "Longitude": [102.8340],
+            "ผลกระทบ(นาที)": [15],
+            "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)": ["-"]
         })
         df.to_csv(file_path, index=False)
 
     df = clean_dataframe(df)
-    df["temp_date"] = pd.to_datetime(df["วัน/เดือน/ปี"], errors="coerce")
-    df["temp_time"] = pd.to_datetime(df["เวลา ที่เกิดเหตุ"], format="%H:%M", errors="coerce")
+    df["temp_date"] = df["วัน/เดือน/ปี"].apply(parse_thai_date)
+    df["temp_time"] = df["เวลา ที่เกิดเหตุ"].apply(parse_time_value)
     df = df.sort_values(by=["temp_date", "temp_time"], ascending=[False, False]).reset_index(drop=True)
     return df
 
@@ -178,8 +245,7 @@ def save_data(df):
 
 def build_display_table(df):
     display_df = df.copy()
-    drop_cols = [col for col in ["temp_date", "temp_time"] if col in display_df.columns]
-    display_df = display_df.drop(columns=drop_cols, errors="ignore")
+    display_df = display_df.drop(columns=["temp_date", "temp_time"], errors="ignore")
     display_df["วัน/เดือน/ปี"] = display_df["วัน/เดือน/ปี"].apply(convert_to_thai_date)
     display_df.insert(0, "ลำดับที่", range(1, len(display_df) + 1))
     return display_df
@@ -205,11 +271,14 @@ def validate_uploaded_columns(df_new):
     return [col for col in REQUIRED_COLUMNS if col not in df_new.columns]
 
 
-def apply_filters(df, areas, date_range, repeat_mode):
+def apply_filters(df, areas, lines, date_range, repeat_mode):
     filtered = df.copy()
 
     if areas:
         filtered = filtered[filtered["พื้นที่"].isin(areas)]
+
+    if lines:
+        filtered = filtered[filtered["สาย"].isin(lines)]
 
     if date_range and len(date_range) == 2 and all(date_range):
         start_date, end_date = date_range
@@ -220,15 +289,15 @@ def apply_filters(df, areas, date_range, repeat_mode):
         filtered = filtered[mask]
 
     if repeat_mode == "เฉพาะจุดซ้ำ":
-        filtered = filtered[filtered["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"].astype(str).str.contains("ซ้ำ", na=False)]
+        filtered = filtered[filtered["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"].astype(str).str.contains("ซ้ำ|ครั้งที่", na=False)]
     elif repeat_mode == "ไม่รวมจุดซ้ำ":
-        filtered = filtered[~filtered["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"].astype(str).str.contains("ซ้ำ", na=False)]
+        filtered = filtered[~filtered["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"].astype(str).str.contains("ซ้ำ|ครั้งที่", na=False)]
 
     return filtered
 
 
 # ==========================================
-# SESSION STATE INIT
+# SESSION STATE
 # ==========================================
 if "flash_message" not in st.session_state:
     st.session_state["flash_message"] = None
@@ -268,22 +337,7 @@ html {{
     border: 2px solid #F1F5F9;
 }}
 
-::-webkit-scrollbar-thumb:hover {{
-    background: linear-gradient(180deg, #1E40AF 0%, #1D4ED8 100%);
-}}
-
-* {{
-    scrollbar-width: thin;
-    scrollbar-color: #2563EB #F1F5F9;
-}}
-
-#MainMenu {{
-    visibility: hidden;
-}}
-footer {{
-    visibility: hidden;
-}}
-header {{
+#MainMenu, footer, header {{
     visibility: hidden;
 }}
 
@@ -313,17 +367,6 @@ header {{
     margin-bottom: 22px;
     position: relative;
     overflow: hidden;
-}}
-
-.dashboard-hero::after {{
-    content: "";
-    position: absolute;
-    top: -30px;
-    right: -30px;
-    width: 220px;
-    height: 220px;
-    background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.00) 70%);
-    border-radius: 50%;
 }}
 
 .hero-flex {{
@@ -372,7 +415,6 @@ header {{
     font-weight: 800;
     margin-bottom: 6px;
     line-height: 1.2;
-    letter-spacing: -0.3px;
 }}
 
 .hero-subtitle {{
@@ -408,7 +450,6 @@ header {{
     color: #0F172A;
     margin-top: 0;
     margin-bottom: 14px;
-    letter-spacing: -0.2px;
 }}
 
 .metric-card {{
@@ -460,7 +501,6 @@ header {{
     justify-content: center;
     background: linear-gradient(135deg, #DBEAFE 0%, #E0F2FE 100%);
     font-size: 20px;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
 }}
 
 .metric-title {{
@@ -537,18 +577,6 @@ header {{
 .stButton > button {{
     border-radius: 14px !important;
     font-weight: 700 !important;
-    border: 1px solid #DCE7F3 !important;
-    padding: 0.72rem 1rem !important;
-    box-shadow: 0 6px 16px rgba(15,23,42,0.05) !important;
-}}
-
-.app-footer {{
-    text-align: center;
-    padding: 28px 24px;
-    margin-top: 40px;
-    font-size: 14px;
-    color: #64748B;
-    border-top: 1px solid #CBD5E1;
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -559,7 +587,7 @@ header {{
 df_base = load_and_sort_data()
 
 # ==========================================
-# SIDEBAR - ADMIN PANEL
+# SIDEBAR ADMIN
 # ==========================================
 with st.sidebar:
     if logo_data_url:
@@ -577,21 +605,15 @@ with st.sidebar:
         st.caption("ไม่พบไฟล์ logo.png")
 
     st.markdown("## ⚙️ ศูนย์จัดการข้อมูล")
-    st.caption("สำหรับเจ้าหน้าที่บันทึกและปรับปรุงข้อมูลระบบ")
-
     admin_mode = st.toggle("เปิดโหมดผู้ดูแลระบบ", value=False)
 
     if admin_mode:
-        st.markdown("---")
-
         if st.session_state.get("flash_message"):
             msg_type, msg_text = st.session_state["flash_message"]
             if msg_type == "success":
                 st.success(msg_text)
             elif msg_type == "warning":
                 st.warning(msg_text)
-            elif msg_type == "error":
-                st.error(msg_text)
             st.session_state["flash_message"] = None
 
         with st.expander("✏️ แก้ไขข้อมูลทั้งชุด", expanded=False):
@@ -611,7 +633,6 @@ with st.sidebar:
 
         with st.expander("📥 นำเข้าข้อมูลจากไฟล์", expanded=False):
             uploaded_file = st.file_uploader("อัปโหลด .csv หรือ .xlsx", type=["csv", "xlsx"], key="file_uploader")
-
             if uploaded_file is not None:
                 try:
                     if uploaded_file.name.endswith(".csv"):
@@ -625,49 +646,50 @@ with st.sidebar:
                     if missing_cols:
                         st.error(f"ไฟล์ขาดคอลัมน์: {', '.join(missing_cols)}")
                     else:
-                        if st.button("➕ ผสานข้อมูลเข้าระบบ", type="secondary", use_container_width=True, key="merge_btn"):
+                        if st.button("➕ ผสานข้อมูลเข้าระบบ", use_container_width=True, key="merge_btn"):
                             df_new_clean = clean_dataframe(df_new[REQUIRED_COLUMNS])
                             combined_df, removed = deduplicate_combined(df_base[REQUIRED_COLUMNS], df_new_clean)
                             save_data(combined_df)
-                            st.session_state["flash_message"] = (
-                                "success",
-                                f"ผสานข้อมูลสำเร็จ ตัดข้อมูลซ้ำออก {removed} รายการ"
-                            )
+                            st.session_state["flash_message"] = ("success", f"ผสานข้อมูลสำเร็จ ตัดข้อมูลซ้ำออก {removed} รายการ")
                             st.rerun()
-
                 except Exception as e:
                     st.error(f"อ่านไฟล์ไม่ได้: {e}")
 
         with st.expander("📝 เพิ่มเหตุการณ์ใหม่", expanded=False):
             with st.form("realtime_input_form", clear_on_submit=True):
                 input_name = st.text_input("ชื่อเหตุอันตราย")
+                input_line = st.text_input("สาย")
+                input_station = st.text_input("ระหว่างสถานี")
                 input_area = st.text_input("พื้นที่")
                 input_km = st.text_input("ที่ กม.")
+                input_cause = st.text_input("สาเหตุ")
 
                 c1, c2 = st.columns(2)
                 with c1:
                     input_date = st.date_input("วัน/เดือน/ปี")
-                    input_lat = st.number_input("Latitude", value=13.7367, format="%.5f")
+                    input_lat = st.number_input("Latitude", value=13.7367, format="%.6f")
                     input_impact = st.number_input("ผลกระทบ(นาที)", min_value=0, step=1)
                 with c2:
                     input_time = st.time_input("เวลา ที่เกิดเหตุ", value=datetime.time(12, 0))
-                    input_lon = st.number_input("Longitude", value=100.5231, format="%.5f")
+                    input_lon = st.number_input("Longitude", value=100.5231, format="%.6f")
                     input_cost = st.text_input("ค่าใช้จ่าย", value="ไม่มีค่าใช้จ่าย")
 
                 input_remark = st.text_input("หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)")
 
                 submitted = st.form_submit_button("💾 บันทึกเหตุการณ์ใหม่", use_container_width=True)
-
                 if submitted:
                     if not input_name.strip() or not input_area.strip() or not input_km.strip():
                         st.error("กรุณากรอกชื่อเหตุ, พื้นที่, ที่ กม. ให้ครบ")
                     else:
                         new_row = pd.DataFrame([{
                             "ชื่อเหตุอันตราย": input_name.strip(),
+                            "สาย": input_line.strip(),
+                            "ระหว่างสถานี": input_station.strip(),
                             "พื้นที่": input_area.strip(),
                             "ที่ กม.": input_km.strip(),
                             "วัน/เดือน/ปี": input_date.strftime("%Y-%m-%d"),
                             "เวลา ที่เกิดเหตุ": input_time.strftime("%H:%M"),
+                            "สาเหตุ": input_cause.strip(),
                             "ค่าใช้จ่าย": input_cost.strip() if str(input_cost).strip() else "ไม่มีค่าใช้จ่าย",
                             "Latitude": input_lat,
                             "Longitude": input_lon,
@@ -679,22 +701,16 @@ with st.sidebar:
                         combined_df, removed = deduplicate_combined(df_base[REQUIRED_COLUMNS], new_row)
 
                         if removed > 0:
-                            st.session_state["flash_message"] = (
-                                "warning",
-                                "ข้อมูลนี้ซ้ำกับรายการที่มีอยู่แล้วในระบบ ไม่ได้บันทึกซ้ำ"
-                            )
+                            st.session_state["flash_message"] = ("warning", "ข้อมูลนี้ซ้ำกับรายการที่มีอยู่แล้วในระบบ ไม่ได้บันทึกซ้ำ")
                         else:
                             save_data(combined_df)
                             st.session_state["flash_message"] = ("success", "เพิ่มข้อมูลใหม่เรียบร้อยแล้ว")
                         st.rerun()
-    else:
-        st.info("โหมดผู้ดูแลระบบถูกปิดอยู่")
 
 # ==========================================
-# HERO HEADER
+# HERO
 # ==========================================
 last_update = get_thai_datetime_now()
-
 hero_logo_html = (
     f'<div class="hero-logo"><img src="{logo_data_url}" alt="โลโก้ฝ่ายการช่างโยธา"/></div>'
     if logo_data_url else
@@ -721,61 +737,50 @@ st.markdown(f"""
 st.markdown('<div class="section-wrap">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">🔎 ตัวกรองข้อมูล</div>', unsafe_allow_html=True)
 
-filter_col1, filter_col2, filter_col3 = st.columns([1.4, 1.4, 1])
+f1, f2, f3, f4 = st.columns([1.2, 1.2, 1.2, 1])
 
-with filter_col1:
+with f1:
     min_date = df_base["temp_date"].min()
     max_date = df_base["temp_date"].max()
-
     if pd.notna(min_date) and pd.notna(max_date):
-        date_range = st.date_input(
-            "ช่วงวันที่",
-            value=(min_date.date(), max_date.date()),
-            key="filter_date"
-        )
+        date_range = st.date_input("ช่วงวันที่", value=(min_date.date(), max_date.date()))
     else:
         today = datetime.date.today()
-        date_range = st.date_input("ช่วงวันที่", value=(today, today), key="filter_date")
+        date_range = st.date_input("ช่วงวันที่", value=(today, today))
 
-with filter_col2:
-    area_options = sorted([a for a in df_base["พื้นที่"].dropna().unique() if str(a).strip() != ""])
-    selected_areas = st.multiselect("พื้นที่ / แขวง", options=area_options, default=area_options, key="filter_area")
+with f2:
+    area_options = sorted([a for a in df_base["พื้นที่"].dropna().unique() if a])
+    selected_areas = st.multiselect("พื้นที่ / แขวง", options=area_options, default=area_options)
 
-with filter_col3:
-    repeat_mode = st.selectbox(
-        "จุดเกิดเหตุซ้ำ",
-        ["ทั้งหมด", "เฉพาะจุดซ้ำ", "ไม่รวมจุดซ้ำ"],
-        key="filter_repeat"
-    )
+with f3:
+    line_options = sorted([a for a in df_base["สาย"].dropna().unique() if a])
+    selected_lines = st.multiselect("สาย", options=line_options, default=line_options)
 
-df_filtered = apply_filters(df_base, selected_areas, date_range, repeat_mode)
+with f4:
+    repeat_mode = st.selectbox("จุดเกิดเหตุซ้ำ", ["ทั้งหมด", "เฉพาะจุดซ้ำ", "ไม่รวมจุดซ้ำ"])
 
+df_filtered = apply_filters(df_base, selected_areas, selected_lines, date_range, repeat_mode)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# Derived data
+# DERIVED DATA
 # ==========================================
-repeated_mask = df_filtered["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"].astype(str).str.contains("ซ้ำ", na=False)
+repeated_mask = df_filtered["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"].astype(str).str.contains("ซ้ำ|ครั้งที่", na=False)
 df_repeated = df_filtered[repeated_mask].copy()
 
 df_display = build_display_table(df_filtered)
 df_repeated_display = build_display_table(df_repeated)
 
 delay_sum = int(df_filtered["ผลกระทบ(นาที)"].sum()) if not df_filtered.empty else 0
-highest_risk_area = (
-    df_filtered["พื้นที่"].mode().iloc[0]
-    if not df_filtered.empty and not df_filtered["พื้นที่"].mode().empty
-    else "-"
-)
+highest_risk_area = df_filtered["พื้นที่"].mode().iloc[0] if not df_filtered.empty and not df_filtered["พื้นที่"].mode().empty else "-"
 
 # ==========================================
-# KPI SECTION
+# KPI
 # ==========================================
 st.markdown('<div class="section-wrap">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">ภาพรวมตัวชี้วัดสำคัญ</div>', unsafe_allow_html=True)
 
 k1, k2, k3, k4 = st.columns(4)
-
 with k1:
     render_metric_card("เหตุการณ์สะสม", f"{len(df_filtered)}", "ตามตัวกรองที่เลือก", "🚨", "red")
 with k2:
@@ -813,8 +818,7 @@ else:
         unsafe_allow_html=True
     )
 
-show_repeated = st.toggle("แสดงรายละเอียดจุดเกิดเหตุซ้ำ", value=True, key="toggle_repeated")
-
+show_repeated = st.toggle("แสดงรายละเอียดจุดเกิดเหตุซ้ำ", value=True)
 if show_repeated and not df_repeated_display.empty:
     st.dataframe(df_repeated_display, use_container_width=True, hide_index=True)
 
@@ -834,8 +838,6 @@ with left_col:
         area_counts.columns = ["พื้นที่", "จำนวนเหตุการณ์"]
         area_counts = area_counts.sort_values(by="จำนวนเหตุการณ์", ascending=True)
 
-        dynamic_height = max(360, len(area_counts) * 48)
-
         fig = px.bar(
             area_counts,
             x="จำนวนเหตุการณ์",
@@ -847,7 +849,7 @@ with left_col:
         )
 
         fig.update_layout(
-            height=dynamic_height,
+            height=max(360, len(area_counts) * 48),
             margin=dict(l=10, r=20, t=10, b=10),
             plot_bgcolor="rgba(0,0,0,0)",
             paper_bgcolor="rgba(0,0,0,0)",
@@ -856,12 +858,7 @@ with left_col:
             xaxis=dict(title=None, showgrid=True, gridcolor="#E2E8F0", zeroline=False),
             yaxis=dict(title=None, showgrid=False)
         )
-        fig.update_traces(
-            textposition="outside",
-            marker_line_width=0,
-            hovertemplate="<b>%{y}</b><br>จำนวนเหตุการณ์: %{x}<extra></extra>"
-        )
-
+        fig.update_traces(textposition="outside", marker_line_width=0)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("ไม่พบข้อมูลสำหรับสร้างกราฟ")
@@ -886,18 +883,19 @@ with right_col:
 
     for _, row in df_filtered.iterrows():
         if pd.notna(row["Latitude"]) and pd.notna(row["Longitude"]):
-            is_repeated = "ซ้ำ" in str(row["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"])
+            is_repeated = bool(re.search(r"ซ้ำ|ครั้งที่", str(row["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"])))
             color = "#B91C1C" if is_repeated else "#2563EB"
-
             impact_val = pd.to_numeric(row["ผลกระทบ(นาที)"], errors="coerce")
             impact_val = int(impact_val) if pd.notna(impact_val) else 0
 
             popup_html = f"""
-            <div style="font-family:Sarabun; min-width:220px; padding:6px 4px;">
+            <div style="font-family:Sarabun; min-width:250px; padding:6px 4px;">
                 <div style="font-size:15px; font-weight:800; color:#0F172A; margin-bottom:6px;">
                     {row["ชื่อเหตุอันตราย"]}
                 </div>
                 <div style="font-size:13px; color:#334155; line-height:1.7;">
+                    <b>สาย:</b> {row["สาย"]}<br>
+                    <b>ระหว่างสถานี:</b> {row["ระหว่างสถานี"]}<br>
                     <b>พื้นที่:</b> {row["พื้นที่"]}<br>
                     <b>กม.:</b> {row["ที่ กม."]}<br>
                     <b>วันที่:</b> {convert_to_thai_date(row["วัน/เดือน/ปี"])}<br>
@@ -913,21 +911,14 @@ with right_col:
                 fill=True,
                 fill_color=color,
                 fill_opacity=0.88,
-                popup=folium.Popup(popup_html, max_width=300)
+                popup=folium.Popup(popup_html, max_width=320)
             ).add_to(m)
 
-    st_folium(
-        m,
-        height=520,
-        use_container_width=True,
-        returned_objects=[],
-        key="thailand_map"
-    )
-
+    st_folium(m, height=520, use_container_width=True, returned_objects=[], key="thailand_map")
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# MAIN TABLE
+# TABLE
 # ==========================================
 st.markdown('<div class="section-wrap">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">ทะเบียนประวัติข้อมูลเหตุการณ์ทั้งหมด</div>', unsafe_allow_html=True)
@@ -941,6 +932,6 @@ st.markdown("""
 <div class="app-footer">
     <b>ระบบสารสนเทศความปลอดภัย</b><br>
     วิศวกรกำกับการกองทางถาวร ศูนย์ทางถาวร ฝ่ายการช่างโยธา การรถไฟแห่งประเทศไทย<br>
-    <span style="color:#94A3B8;">Executive Dashboard - Modern Premium UI</span>
+    <span style="color:#94A3B8;">Executive Dashboard - Integrated Excel Schema Version</span>
 </div>
 """, unsafe_allow_html=True)
