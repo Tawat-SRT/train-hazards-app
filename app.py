@@ -5,6 +5,7 @@ from streamlit_folium import st_folium
 import datetime
 import plotly.express as px
 import os
+import base64
 
 # ==========================================
 # CONFIG
@@ -17,6 +18,7 @@ st.set_page_config(
 )
 
 DATA_FILE = "hazard_data_shared.csv"
+LOGO_FILE = "logo.png"
 
 THAI_MONTHS = [
     "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
@@ -36,17 +38,24 @@ REQUIRED_COLUMNS = [
     "หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"
 ]
 
-# ขอบเขตประเทศไทยโดยประมาณ (ใช้สำหรับจำกัดการ pan/zoom)
 THAILAND_BOUNDS = [[5.6, 97.3], [20.5, 105.7]]
 THAILAND_CENTER = [13.7367, 100.5231]
 THAILAND_DEFAULT_ZOOM = 6
 
-# โลโก้ฝ่ายการช่างโยธา การรถไฟแห่งประเทศไทย
-LOGO_URL = "[upload.wikimedia.org](https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/State_Railway_of_Thailand_Logo.svg/200px-State_Railway_of_Thailand_Logo.svg.png)"
-
 # ==========================================
 # HELPERS
 # ==========================================
+def get_logo_data_url():
+    try:
+        if os.path.exists(LOGO_FILE):
+            with open(LOGO_FILE, "rb") as f:
+                logo_base64 = base64.b64encode(f.read()).decode()
+            return f"data:image/png;base64,{logo_base64}"
+        return None
+    except Exception:
+        return None
+
+
 def convert_to_thai_date(date_str):
     try:
         for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
@@ -127,9 +136,6 @@ def deduplicate_combined(existing_df, new_df):
 
 @st.cache_data(show_spinner=False)
 def load_data_cached(file_path, mtime):
-    """โหลดและจัด sort ข้อมูล โดย cache ตาม mtime ของไฟล์
-    เมื่อไฟล์เปลี่ยนแปลง cache จะถูก invalidate อัตโนมัติ
-    """
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
     else:
@@ -226,8 +232,8 @@ def apply_filters(df, areas, date_range, repeat_mode):
 # ==========================================
 if "flash_message" not in st.session_state:
     st.session_state["flash_message"] = None
-if "data_version" not in st.session_state:
-    st.session_state["data_version"] = 0
+
+logo_data_url = get_logo_data_url()
 
 # ==========================================
 # STYLES
@@ -242,7 +248,6 @@ html, body, [class*="css"], .stApp {{
     font-family: 'Sarabun', sans-serif !important;
 }}
 
-/* บังคับให้หน้าจอมี scrollbar แนวตั้งตลอดเวลา และ scrollbar สวยขึ้น */
 html {{
     overflow-y: scroll !important;
 }}
@@ -529,28 +534,12 @@ header {{
     padding: 8px !important;
 }}
 
-div[data-testid="stMetric"] {{
-    background: transparent !important;
-    border: none !important;
-}}
-
 .stButton > button {{
     border-radius: 14px !important;
     font-weight: 700 !important;
     border: 1px solid #DCE7F3 !important;
     padding: 0.72rem 1rem !important;
     box-shadow: 0 6px 16px rgba(15,23,42,0.05) !important;
-}}
-
-.stDownloadButton > button {{
-    border-radius: 14px !important;
-    font-weight: 700 !important;
-}}
-
-div[data-baseweb="select"] > div,
-div[data-baseweb="input"] > div,
-div[data-baseweb="base-input"] {{
-    border-radius: 12px !important;
 }}
 
 .app-footer {{
@@ -560,26 +549,6 @@ div[data-baseweb="base-input"] {{
     font-size: 14px;
     color: #64748B;
     border-top: 1px solid #CBD5E1;
-}}
-
-@media print {{
-    @page {{
-        size: A4 portrait;
-        margin: 1cm;
-    }}
-
-    .stApp {{
-        background: white !important;
-    }}
-
-    .stButton,
-    .stExpander,
-    div[data-testid="stDataEditor"],
-    div[data-testid="stToolbar"],
-    .app-footer,
-    .no-print {{
-        display: none !important;
-    }}
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -593,15 +562,19 @@ df_base = load_and_sort_data()
 # SIDEBAR - ADMIN PANEL
 # ==========================================
 with st.sidebar:
-    st.markdown(
-        f"""
-        <div class="sidebar-logo">
-            <img src="{LOGO_URL}" alt="โลโก้ฝ่ายการช่างโยธา"/>
-            <div class="sidebar-org">ฝ่ายการช่างโยธา<br/>การรถไฟแห่งประเทศไทย</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    if logo_data_url:
+        st.markdown(
+            f"""
+            <div class="sidebar-logo">
+                <img src="{logo_data_url}" alt="โลโก้ฝ่ายการช่างโยธา"/>
+                <div class="sidebar-org">ฝ่ายการช่างโยธา<br/>การรถไฟแห่งประเทศไทย</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown("### ฝ่ายการช่างโยธา")
+        st.caption("ไม่พบไฟล์ logo.png")
 
     st.markdown("## ⚙️ ศูนย์จัดการข้อมูล")
     st.caption("สำหรับเจ้าหน้าที่บันทึกและปรับปรุงข้อมูลระบบ")
@@ -718,16 +691,20 @@ with st.sidebar:
         st.info("โหมดผู้ดูแลระบบถูกปิดอยู่")
 
 # ==========================================
-# HERO HEADER (with logo)
+# HERO HEADER
 # ==========================================
 last_update = get_thai_datetime_now()
+
+hero_logo_html = (
+    f'<div class="hero-logo"><img src="{logo_data_url}" alt="โลโก้ฝ่ายการช่างโยธา"/></div>'
+    if logo_data_url else
+    '<div class="hero-logo"><span style="color:#1E3A8A;font-weight:800;">LOGO</span></div>'
+)
 
 st.markdown(f"""
 <div class="dashboard-hero">
     <div class="hero-flex">
-        <div class="hero-logo">
-            <img src="{LOGO_URL}" alt="โลโก้ฝ่ายการช่างโยธา"/>
-        </div>
+        {hero_logo_html}
         <div class="hero-text">
             <div class="hero-org">ฝ่ายการช่างโยธา · การรถไฟแห่งประเทศไทย</div>
             <div class="hero-title">🚆 Executive Dashboard: สถานการณ์อุบัติเหตุรถไฟเฉี่ยวชนสัตว์</div>
@@ -739,7 +716,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# FILTER BAR (TOP)
+# FILTER BAR
 # ==========================================
 st.markdown('<div class="section-wrap">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">🔎 ตัวกรองข้อมูล</div>', unsafe_allow_html=True)
@@ -776,7 +753,7 @@ df_filtered = apply_filters(df_base, selected_areas, date_range, repeat_mode)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# Prepare derived data (จาก filter)
+# Derived data
 # ==========================================
 repeated_mask = df_filtered["หมายเหตุ(จุดเกิดเหตุซ้ำ ± 3 Km)"].astype(str).str.contains("ซ้ำ", na=False)
 df_repeated = df_filtered[repeated_mask].copy()
@@ -844,7 +821,7 @@ if show_repeated and not df_repeated_display.empty:
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# CHART + MAP (focus on Thailand)
+# CHART + MAP
 # ==========================================
 left_col, right_col = st.columns([1.05, 1.15])
 
@@ -903,8 +880,6 @@ with right_col:
         max_bounds=True,
         tiles="CartoDB positron"
     )
-
-    # จำกัดขอบเขตแผนที่เฉพาะประเทศไทย
     m.fit_bounds(THAILAND_BOUNDS)
     m.options["maxBounds"] = THAILAND_BOUNDS
     m.options["maxBoundsViscosity"] = 1.0
@@ -941,7 +916,6 @@ with right_col:
                 popup=folium.Popup(popup_html, max_width=300)
             ).add_to(m)
 
-    # ใช้ key คงที่ + returned_objects=[] เพื่อลด rerun ระหว่างเลื่อน/ซูม
     st_folium(
         m,
         height=520,
